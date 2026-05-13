@@ -1,0 +1,98 @@
+[
+  {
+    "id": 1,
+    "text": "Finish reading Pacifican Copilot",
+    "context": "",
+    "type": "work",
+    "prio": "med",
+    "cat": "Reading",
+    "assigned": "",
+    "done": false,
+    "createdAt": "2026-05-08T00:00:00.000Z",
+    "doneAt": null
+  },
+  {
+    "id": 2,
+    "text": "RDII AI Business",
+    "context": "Review and finalize RDII AI business case",
+    "type": "work",
+    "prio": "high",
+    "cat": "Business",
+    "assigned": "",
+    "done": false,
+    "createdAt": "2026-05-09T00:00:00.000Z",
+    "doneAt": null
+  },
+  {
+    "id": 3,
+    "text": "REGI Process Timeline",
+    "context": "Map out full REGI process timeline with milestones",
+    "type": "work",
+    "prio": "high",
+    "cat": "Operations",
+    "assigned": "",
+    "done": false,
+    "createdAt": "2026-05-10T00:00:00.000Z",
+    "doneAt": null
+  },
+  {
+    "id": 4,
+    "text": "Transformation Agent",
+    "context": "Define scope and deliverables for Transformation Agent project",
+    "type": "work",
+    "prio": "high",
+    "cat": "Strategy",
+    "assigned": "",
+    "done": false,
+    "createdAt": "2026-05-11T00:00:00.000Z",
+    "doneAt": null
+  },
+  {
+    "id": 5,
+    "text": "Create Excel sheet — timelines, operations, strategy, impact",
+    "context": "Comprehensive Excel workbook covering all project dimensions",
+    "type": "work",
+    "prio": "med",
+    "cat": "Admin",
+    "assigned": "",
+    "done": false,
+    "createdAt": "2026-05-11T00:00:00.000Z",
+    "doneAt": null
+  },
+  {
+    "id": 6,
+    "text": "Verify Excel sheet + Transformation Agent — review with Eric",
+    "context": "Cross-check Excel against Transformation Agent scope; align with Eric before sign-off",
+    "type": "work",
+    "prio": "high",
+    "cat": "Strategy",
+    "assigned": "Eric",
+    "done": false,
+    "createdAt": "2026-05-12T00:00:00.000Z",
+    "doneAt": null
+  },
+  {
+    "id": 7,
+    "text": "Update direct deposit",
+    "context": "",
+    "type": "personal",
+    "prio": "low",
+    "cat": "Finance",
+    "assigned": "",
+    "done": false,
+    "createdAt": "2026-05-11T00:00:00.000Z",
+    "doneAt": null
+  },
+  {
+    "id": 8,
+    "text": "Send mail to HR for reimbursement",
+    "context": "",
+    "type": "personal",
+    "prio": "low",
+    "cat": "HR",
+    "assigned": "",
+    "done": false,
+    "createdAt": "2026-05-12T00:00:00.000Z",
+    "doneAt": null
+  }
+]
