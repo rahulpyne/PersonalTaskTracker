@@ -79,14 +79,17 @@ alter publication supabase_realtime add table tasks;
 alter publication supabase_realtime add table audit_log;
 
 -- ── Seed data ─────────────────────────────────────────────────────────────────
+-- Matches the design's seed tasks (title, category, priority, notes)
 
-insert into tasks (title, category, priority, type, "group", due_date) values
-  ('Design onboarding flow',     'work',     'high',   'feature', 'Q2 Launch',  current_date + 2),
-  ('Fix login redirect bug',     'work',     'high',   'bug',     'Auth',       current_date),
-  ('Write API documentation',    'work',     'medium', 'docs',    'Platform',   current_date + 7),
-  ('Code review — payments PR',  'work',     'medium', 'review',  'Payments',   current_date + 1),
-  ('Update dependencies',        'work',     'low',    'chore',   'Infra',      current_date + 14),
-  ('Plan weekend trip',          'personal', 'medium', null,      null,         current_date + 10),
-  ('Buy groceries',              'personal', 'low',    null,      null,         current_date),
-  ('Read "Shape Up" book',       'personal', 'low',    null,      null,         null)
+insert into tasks (title, category, priority, notes) values
+  ('Ship onboarding redesign v2',        'work',     'high',   'Review Figma w/ Mira at 3pm. Animation timings need polish.'),
+  ('Reply to investor update thread',    'work',     'high',   ''),
+  ('Draft Q3 OKRs',                      'work',     'medium', 'Focus on growth + retention. Cut nice-to-haves.'),
+  ('1:1 prep with Sam',                  'work',     'medium', ''),
+  ('Renew passport',                     'personal', 'high',   'Photos already taken — at coffee table folder.'),
+  ('Book climbing gym membership',       'personal', 'low',    ''),
+  ('Call mum',                           'personal', 'medium', ''),
+  ('Pick up dry cleaning',              'personal', 'low',    ''),
+  ('Read Chapter 4 — Designing for the Mind', 'personal', 'low', 'Highlight anything on perceived performance.'),
+  ('Refactor analytics dashboard pipeline',   'work',     'medium', '')
 on conflict do nothing;
