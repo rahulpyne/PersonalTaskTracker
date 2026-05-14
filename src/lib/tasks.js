@@ -1,7 +1,5 @@
 import { supabase } from './supabase'
 
-// ── Fetch ──────────────────────────────────────────────────────────────────
-
 export async function fetchTasks() {
   const { data, error } = await supabase
     .from('tasks')
@@ -10,18 +8,6 @@ export async function fetchTasks() {
   if (error) throw error
   return data
 }
-
-export async function fetchAuditLog() {
-  const { data, error } = await supabase
-    .from('audit_log')
-    .select('*')
-    .order('changed_at', { ascending: false })
-    .limit(100)
-  if (error) throw error
-  return data
-}
-
-// ── Mutations ──────────────────────────────────────────────────────────────
 
 export async function createTask(fields) {
   const { data, error } = await supabase
@@ -49,32 +35,15 @@ export async function deleteTask(id) {
   if (error) throw error
 }
 
-export async function toggleComplete(id, completed) {
-  return updateTask(id, { completed, completed_at: completed ? new Date().toISOString() : null })
+export async function clearCompleted() {
+  const { error } = await supabase.from('tasks').delete().eq('completed', true)
+  if (error) throw error
 }
-
-// ── Snapshot restore ───────────────────────────────────────────────────────
-
-export async function restoreSnapshot(auditEntry) {
-  const snap = auditEntry.before_snapshot
-  if (!snap) throw new Error('No before_snapshot to restore')
-  return updateTask(snap.id, snap)
-}
-
-// ── Realtime ───────────────────────────────────────────────────────────────
 
 export function subscribeToTasks(onChange) {
   const channel = supabase
-    .channel('tasks-realtime')
+    .channel('tasks-rt')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, onChange)
-    .subscribe()
-  return () => supabase.removeChannel(channel)
-}
-
-export function subscribeToAudit(onChange) {
-  const channel = supabase
-    .channel('audit-realtime')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'audit_log' }, onChange)
     .subscribe()
   return () => supabase.removeChannel(channel)
 }
