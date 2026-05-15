@@ -3,3 +3,7 @@ dist
 .env.local
 .env
 .DS_Store
+.vercel
+
+# Agent secrets
+agents/.env
