@@ -17,6 +17,7 @@ import { run as fetchEmails }   from './fetcher.js'
 import { run as analyzeEmails } from './analyzer.js'
 import { run as extractTasks }  from './extractor.js'
 import { run as writeTasks }    from './writer.js'
+import { run as cleanInbox }    from './cleaner.js'
 
 // ── Validate env ──────────────────────────────────────────────────────────────
 
@@ -49,6 +50,8 @@ const supabase = createSupabaseClient(
   process.env.SUPABASE_SERVICE_KEY,
 )
 
+const USER = process.env.GMAIL_USER || 'me'
+
 // ── Pipeline ─────────────────────────────────────────────────────────────────
 
 async function pipeline() {
@@ -57,33 +60,43 @@ async function pipeline() {
   log('══════════════════════════════════════')
 
   try {
-    // 1. Fetch emails
+    // ── Phase A: Task extraction from Primary inbox ────────────────────────
+
+    // 1. Fetch emails from real people only (Primary, last 24h)
     const emails = await fetchEmails(gmail, {
-      user:          process.env.GMAIL_USER || 'me',
+      user:          USER,
       lookbackHours: Number(process.env.LOOKBACK_HOURS || 24),
     })
-    if (!emails.length) {
-      log('No emails to process — done.')
-      return
+
+    if (emails.length) {
+      // 2. Classify importance with LLM
+      const actionable = await analyzeEmails(emails, llm, {
+        threshold: Number(process.env.IMPORTANCE_THRESHOLD || 6),
+      })
+
+      if (actionable.length) {
+        // 3. Extract parent tasks + subtasks with LLM
+        const taskGroups = await extractTasks(actionable, llm)
+
+        // 4. Persist to Supabase (deduped by source email ID)
+        const { created, skipped } = await writeTasks(taskGroups, supabase)
+        log(`Tasks: ${created} created, ${skipped} dupes skipped`)
+      } else {
+        log('No actionable emails found in Primary.')
+      }
+    } else {
+      log('No emails from real people in Primary.')
     }
 
-    // 2. Classify importance with LLM
-    const actionable = await analyzeEmails(emails, llm, {
-      threshold: Number(process.env.IMPORTANCE_THRESHOLD || 6),
+    // ── Phase B: Inbox cleanup (Spam / Promotions / Social / Updates) ──────
+
+    const { trashed } = await cleanInbox(gmail, {
+      user:          USER,
+      olderThanDays: Number(process.env.CLEAN_OLDER_THAN_DAYS || 7),
     })
-    if (!actionable.length) {
-      log('No actionable emails found — done.')
-      return
-    }
-
-    // 3. Extract tasks & subtasks with LLM
-    const taskGroups = await extractTasks(actionable, llm)
-
-    // 4. Persist to Supabase
-    const { created, skipped } = await writeTasks(taskGroups, supabase)
 
     log('══════════════════════════════════════')
-    log(`Pipeline complete: ${created} tasks created, ${skipped} dupes skipped`)
+    log(`Pipeline complete — ${trashed} junk emails trashed`)
     log('══════════════════════════════════════')
   } catch (e) {
     err('Pipeline error:', e.message)
@@ -94,7 +107,7 @@ async function pipeline() {
 // ── Scheduler ─────────────────────────────────────────────────────────────────
 
 const schedule = process.env.CRON_SCHEDULE || '0 23 * * *'
-const timezone = process.env.TIMEZONE      || 'Asia/Kolkata'
+const timezone = process.env.TIMEZONE      || 'America/Vancouver'
 
 cron.schedule(schedule, pipeline, { timezone })
 log(`Orchestrator running — schedule: "${schedule}" (${timezone})`)

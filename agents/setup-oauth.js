@@ -25,7 +25,7 @@ if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
 }
 
 const REDIRECT = 'http://localhost:3000'
-const SCOPES   = ['https://www.googleapis.com/auth/gmail.readonly']
+const SCOPES   = ['https://www.googleapis.com/auth/gmail.modify']
 
 const oauth2 = new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, REDIRECT)
 
