@@ -21,6 +21,7 @@ import { run as analyzeEmails } from './analyzer.js'
 import { run as extractTasks }  from './extractor.js'
 import { run as writeTasks }    from './writer.js'
 import { run as cleanInbox }    from './cleaner.js'
+import { run as pruneData }     from './pruner.js'
 
 const __dir          = path.dirname(fileURLToPath(import.meta.url))
 const ACCOUNTS_FILE  = path.join(__dir, 'accounts.json')
@@ -118,6 +119,13 @@ async function pipeline() {
       err(`${account.email} failed:`, e.message)
     }
   }
+
+  // Phase C: prune old data (runs once per nightly job, not per account)
+  // Anonymises completed tasks and hard-deletes subtasks/stale-open tasks
+  // older than RETENTION_DAYS — preserves all metric fields intact.
+  await pruneData(supabase, {
+    retentionDays: Number(process.env.RETENTION_DAYS || 90),
+  })
 
   log('══════════════════════════════════════')
   log(`Pipeline complete — ${accounts.length} accounts processed`)
