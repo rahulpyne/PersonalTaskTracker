@@ -1,95 +1,71 @@
+-- ── Schema permissions (required for new Supabase projects) ──────────────────
+
+grant usage on schema public to anon, authenticated;
+grant all   on all tables    in schema public to anon, authenticated;
+grant all   on all sequences in schema public to anon, authenticated;
+alter default privileges in schema public
+  grant all on tables    to anon, authenticated;
+alter default privileges in schema public
+  grant all on sequences to anon, authenticated;
+
 -- ── Tables ──────────────────────────────────────────────────────────────────
 
 create table if not exists tasks (
-  id           uuid primary key default gen_random_uuid(),
-  title        text not null,
-  notes        text,
-  category     text not null default 'work' check (category in ('work','personal')),
-  priority     text not null default 'medium' check (priority in ('high','medium','low')),
-  type         text,
-  "group"      text,
-  assigned_to  text,
-  due_date     date,
-  completed    boolean not null default false,
-  completed_at timestamptz,
-  created_at   timestamptz not null default now(),
-  updated_at   timestamptz not null default now()
+  id         uuid        primary key default gen_random_uuid(),
+  text       text        not null,
+  type       text        not null default 'work'   check (type   in ('work','personal')),
+  prio       text        not null default 'med'    check (prio   in ('high','med','low')),
+  context    text        not null default '',
+  done       boolean     not null default false,
+  done_at    timestamptz,
+  created_at timestamptz not null default now(),
+  -- legacy columns kept for back-compat (ignored by app)
+  cat        text        not null default '',
+  assigned   text        not null default '',
+  position   int         not null default 0
 );
 
-create table if not exists audit_log (
-  id              uuid primary key default gen_random_uuid(),
-  task_id         uuid references tasks(id) on delete set null,
-  action          text not null check (action in ('INSERT','UPDATE','DELETE')),
-  before_snapshot jsonb,
-  after_snapshot  jsonb,
-  changed_at      timestamptz not null default now()
-);
+-- ── Auto-timestamp on completion ────────────────────────────────────────────
 
--- ── Auto-update updated_at ───────────────────────────────────────────────────
-
-create or replace function set_updated_at()
+create or replace function set_done_at()
 returns trigger language plpgsql as $$
 begin
-  new.updated_at = now();
+  if new.done and old.done is distinct from new.done then
+    new.done_at = now();
+  elsif not new.done then
+    new.done_at = null;
+  end if;
   return new;
 end;
 $$;
 
-drop trigger if exists tasks_updated_at on tasks;
-create trigger tasks_updated_at
+drop trigger if exists tasks_done_at on tasks;
+create trigger tasks_done_at
   before update on tasks
-  for each row execute function set_updated_at();
-
--- ── Audit trigger ────────────────────────────────────────────────────────────
-
-create or replace function audit_task_changes()
-returns trigger language plpgsql security definer as $$
-begin
-  if tg_op = 'INSERT' then
-    insert into audit_log (task_id, action, after_snapshot)
-    values (new.id, 'INSERT', to_jsonb(new));
-  elsif tg_op = 'UPDATE' then
-    insert into audit_log (task_id, action, before_snapshot, after_snapshot)
-    values (new.id, 'UPDATE', to_jsonb(old), to_jsonb(new));
-  elsif tg_op = 'DELETE' then
-    insert into audit_log (task_id, action, before_snapshot)
-    values (old.id, 'DELETE', to_jsonb(old));
-  end if;
-  return coalesce(new, old);
-end;
-$$;
-
-drop trigger if exists tasks_audit on tasks;
-create trigger tasks_audit
-  after insert or update or delete on tasks
-  for each row execute function audit_task_changes();
+  for each row execute function set_done_at();
 
 -- ── RLS ──────────────────────────────────────────────────────────────────────
 
-alter table tasks     enable row level security;
-alter table audit_log enable row level security;
+alter table tasks enable row level security;
 
--- Allow full access via anon key (single-user app; tighten for multi-user)
-create policy "anon all tasks"     on tasks     for all to anon using (true) with check (true);
-create policy "anon all audit_log" on audit_log for all to anon using (true) with check (true);
+drop policy if exists "anon all tasks" on tasks;
+create policy "anon all tasks" on tasks for all to anon using (true) with check (true);
 
 -- ── Realtime ─────────────────────────────────────────────────────────────────
 
 alter publication supabase_realtime add table tasks;
-alter publication supabase_realtime add table audit_log;
 
--- ── Seed data ─────────────────────────────────────────────────────────────────
--- Matches the design's seed tasks (title, category, priority, notes)
+-- ── Seed data ────────────────────────────────────────────────────────────────
 
-insert into tasks (title, category, priority, notes) values
-  ('Ship onboarding redesign v2',        'work',     'high',   'Review Figma w/ Mira at 3pm. Animation timings need polish.'),
-  ('Reply to investor update thread',    'work',     'high',   ''),
-  ('Draft Q3 OKRs',                      'work',     'medium', 'Focus on growth + retention. Cut nice-to-haves.'),
-  ('1:1 prep with Sam',                  'work',     'medium', ''),
-  ('Renew passport',                     'personal', 'high',   'Photos already taken — at coffee table folder.'),
-  ('Book climbing gym membership',       'personal', 'low',    ''),
-  ('Call mum',                           'personal', 'medium', ''),
-  ('Pick up dry cleaning',              'personal', 'low',    ''),
-  ('Read Chapter 4 — Designing for the Mind', 'personal', 'low', 'Highlight anything on perceived performance.'),
-  ('Refactor analytics dashboard pipeline',   'work',     'medium', '')
+insert into tasks (text, type, prio, context) values
+  ('Ship onboarding redesign v2',             'work',     'high', 'Review Figma w/ Mira at 3pm. Animation timings need polish.'),
+  ('Reply to investor update thread',         'work',     'high', ''),
+  ('Draft Q3 OKRs',                           'work',     'med',  'Focus on growth + retention. Cut nice-to-haves.'),
+  ('1:1 prep with Sam',                       'work',     'med',  ''),
+  ('Renew passport',                          'personal', 'high', 'Photos already taken — at coffee table folder.'),
+  ('Book climbing gym membership',            'personal', 'low',  ''),
+  ('Call mum',                                'personal', 'med',  ''),
+  ('Pick up dry cleaning',                    'personal', 'low',  ''),
+  ('Read Chapter 4 — Designing for the Mind', 'personal', 'low',  'Highlight anything on perceived performance.'),
+  ('Refactor analytics dashboard pipeline',   'work',     'med',  '')
 on conflict do nothing;

@@ -4,7 +4,7 @@ import { TaskList, Composer } from './components/TaskList'
 import Insights from './components/Insights'
 import { ReactiveAvatar } from './components/Avatar'
 import { IconList, IconBars, CatIcon } from './components/Icons'
-import { toUI, toDB } from './lib/adapter'
+import { toUI, toDB, toDBToggle } from './lib/adapter'
 import { buildHistory } from './lib/history'
 import { fetchTasks, createTask, updateTask, deleteTask, clearCompleted, subscribeToTasks } from './lib/tasks'
 
@@ -61,13 +61,11 @@ export default function App() {
   const onToggle = async (id) => {
     const task = dbTasks.find(t => t.id === id)
     if (!task) return
-    const next = !task.completed
-    setDbTasks(ts => ts.map(t => t.id === id
-      ? { ...t, completed: next, completed_at: next ? new Date().toISOString() : null }
-      : t
-    ))
+    const next = !task.done
+    const dbFields = toDBToggle(next)
+    setDbTasks(ts => ts.map(t => t.id === id ? { ...t, ...dbFields } : t))
     try {
-      await updateTask(id, { completed: next, completed_at: next ? new Date().toISOString() : null })
+      await updateTask(id, dbFields)
     } catch {
       fetchTasks().then(setDbTasks)
     }
@@ -84,9 +82,9 @@ export default function App() {
   }
 
   const onSaveNote = async (id, notes) => {
-    setDbTasks(ts => ts.map(t => t.id === id ? { ...t, notes } : t))
+    setDbTasks(ts => ts.map(t => t.id === id ? { ...t, context: notes } : t))
     try {
-      await updateTask(id, { notes })
+      await updateTask(id, { context: notes })
     } catch {
       fetchTasks().then(setDbTasks)
     }

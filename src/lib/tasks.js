@@ -36,7 +36,7 @@ export async function deleteTask(id) {
 }
 
 export async function clearCompleted() {
-  const { error } = await supabase.from('tasks').delete().eq('completed', true)
+  const { error } = await supabase.from('tasks').delete().eq('done', true)
   if (error) throw error
 }
 
