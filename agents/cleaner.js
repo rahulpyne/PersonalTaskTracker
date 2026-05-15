@@ -1,13 +1,15 @@
 /**
  * Agent 5 — Gmail Cleaner
  *
- * Moves emails older than CLEAN_OLDER_THAN_DAYS to Trash from:
+ * Moves emails to Trash from:
  *   - Spam
  *   - Promotions
  *   - Social
  *   - Updates
  *
  * Primary inbox is NEVER touched.
+ * If olderThanDays > 0, only emails older than that many days are trashed.
+ * If olderThanDays <= 0 (default), ALL emails in those categories are trashed.
  * Uses batchModify (50 per call) to stay within Gmail API rate limits.
  * Requires gmail.modify scope.
  */
@@ -20,20 +22,23 @@ const CATEGORIES = [
   { label: 'Updates',    query: 'category:updates'    },
 ]
 
-const BATCH_SIZE    = 50   // Gmail batchModify limit
-const MAX_PER_CAT   = 500  // safety cap per category per run
+const BATCH_SIZE    = 50    // Gmail batchModify limit
+const MAX_PER_CAT   = 1000  // safety cap per category per run
 
 export async function run(gmail, {
   user           = 'me',
-  olderThanDays  = 7,
+  olderThanDays  = 0,
   maxPerCategory = MAX_PER_CAT,
 } = {}) {
   log('GmailCleaner: starting')
 
-  // Only touch emails older than N days so recent ones stay visible
-  const cutoff = new Date()
-  cutoff.setDate(cutoff.getDate() - olderThanDays)
-  const beforeEpoch = Math.floor(cutoff.getTime() / 1000)
+  // Build optional date filter — skip it when olderThanDays <= 0
+  let dateFilter = ''
+  if (olderThanDays > 0) {
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - olderThanDays)
+    dateFilter = ` before:${Math.floor(cutoff.getTime() / 1000)}`
+  }
 
   let totalTrashed = 0
 
@@ -41,7 +46,7 @@ export async function run(gmail, {
     try {
       const { data } = await gmail.users.messages.list({
         userId:     user,
-        q:          `${query} before:${beforeEpoch}`,
+        q:          `${query}${dateFilter}`,
         maxResults: maxPerCategory,
       })
 

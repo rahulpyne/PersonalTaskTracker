@@ -90,7 +90,7 @@ async function runForAccount({ email, refreshToken }) {
   // Phase B: clean junk
   const { trashed } = await cleanInbox(gmailClient, {
     user:          email,
-    olderThanDays: Number(process.env.CLEAN_OLDER_THAN_DAYS || 7),
+    olderThanDays: Number(process.env.CLEAN_OLDER_THAN_DAYS || 0),
   })
   log(`${email}: ${trashed} junk emails trashed`)
 }
