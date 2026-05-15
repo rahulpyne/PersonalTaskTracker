@@ -4,7 +4,7 @@ export function createGmailClient({ clientId, clientSecret, refreshToken }) {
   const oauth2 = new google.auth.OAuth2(
     clientId,
     clientSecret,
-    'http://localhost:3000/oauth/callback'
+    'http://localhost:3000'
   )
   oauth2.setCredentials({ refresh_token: refreshToken })
   return google.gmail({ version: 'v1', auth: oauth2 })

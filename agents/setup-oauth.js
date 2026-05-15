@@ -14,6 +14,8 @@
 import 'dotenv/config'
 import { google } from 'googleapis'
 import http from 'http'
+import fs from 'fs'
+import path from 'path'
 
 const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } = process.env
 
@@ -22,7 +24,7 @@ if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
   process.exit(1)
 }
 
-const REDIRECT = 'http://localhost:3000/oauth/callback'
+const REDIRECT = 'http://localhost:3000'
 const SCOPES   = ['https://www.googleapis.com/auth/gmail.readonly']
 
 const oauth2 = new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, REDIRECT)
@@ -44,7 +46,7 @@ console.log('3. You\'ll be redirected back automatically.\n')
 const server = http.createServer(async (req, res) => {
   try {
     const url  = new URL(req.url, 'http://localhost:3000')
-    if (url.pathname !== '/oauth/callback') { res.end(); return }
+    if (!url.searchParams.get('code')) { res.end(); return }
 
     const code = url.searchParams.get('code')
     if (!code) {
@@ -59,12 +61,21 @@ const server = http.createServer(async (req, res) => {
 
     const { tokens } = await oauth2.getToken(code)
 
+    // Write refresh token directly into agents/.env
+    const envPath  = path.resolve('agents/.env')
+    const fallback = path.resolve('.env')
+    const target   = fs.existsSync(envPath) ? envPath : fallback
+    let content    = fs.readFileSync(target, 'utf-8')
+    content        = content.replace(
+      /^GOOGLE_REFRESH_TOKEN=.*$/m,
+      `GOOGLE_REFRESH_TOKEN=${tokens.refresh_token}`
+    )
+    fs.writeFileSync(target, content)
+
     console.log('─────────────────────────────────────────────')
     console.log('✅  Authorization successful!')
+    console.log(`✅  Refresh token saved to ${target}`)
     console.log('─────────────────────────────────────────────')
-    console.log('\nAdd this line to agents/.env:\n')
-    console.log(`GOOGLE_REFRESH_TOKEN=${tokens.refresh_token}`)
-    console.log()
   } catch (e) {
     console.error('OAuth error:', e.message)
     server.close()
