@@ -9,3 +9,4 @@ dist
 agents/.env
 agents/.env:
 agents/.env::*
+agents/accounts.json

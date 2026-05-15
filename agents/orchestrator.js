@@ -7,6 +7,9 @@
  */
 import 'dotenv/config'
 import cron from 'node-cron'
+import fs   from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
 import { createGmailClient }    from './lib/gmail.js'
 import { createLLMClient }      from './lib/llm.js'
@@ -18,6 +21,9 @@ import { run as analyzeEmails } from './analyzer.js'
 import { run as extractTasks }  from './extractor.js'
 import { run as writeTasks }    from './writer.js'
 import { run as cleanInbox }    from './cleaner.js'
+
+const __dir          = path.dirname(fileURLToPath(import.meta.url))
+const ACCOUNTS_FILE  = path.join(__dir, 'accounts.json')
 
 // ── Validate env ──────────────────────────────────────────────────────────────
 
@@ -34,12 +40,6 @@ if (missing.length) {
 
 // ── Clients ───────────────────────────────────────────────────────────────────
 
-const gmail    = createGmailClient({
-  clientId:     process.env.GOOGLE_CLIENT_ID,
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  refreshToken: process.env.GOOGLE_REFRESH_TOKEN,
-})
-
 const llm      = createLLMClient(
   process.env.GEMINI_API_KEY,
   process.env.GEMINI_MODEL || 'gemini-2.0-flash-lite',
@@ -50,58 +50,78 @@ const supabase = createSupabaseClient(
   process.env.SUPABASE_SERVICE_KEY,
 )
 
-const USER = process.env.GMAIL_USER || 'me'
+// ── Per-account pipeline ──────────────────────────────────────────────────────
 
-// ── Pipeline ─────────────────────────────────────────────────────────────────
+async function runForAccount({ email, refreshToken }) {
+  if (!refreshToken) {
+    warn(`Skipping ${email} — no refresh token. Run: node setup-oauth.js ${email}`)
+    return
+  }
+
+  log(`── Account: ${email} ──`)
+  const gmailClient = createGmailClient({
+    clientId:     process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    refreshToken,
+  })
+
+  // Phase A: extract tasks from important emails
+  const emails = await fetchEmails(gmailClient, {
+    user:          email,
+    lookbackHours: Number(process.env.LOOKBACK_HOURS || 24),
+  })
+
+  if (emails.length) {
+    const actionable = await analyzeEmails(emails, llm, {
+      threshold: Number(process.env.IMPORTANCE_THRESHOLD || 6),
+    })
+    if (actionable.length) {
+      const taskGroups          = await extractTasks(actionable, llm)
+      const { created, skipped } = await writeTasks(taskGroups, supabase)
+      log(`${email}: ${created} tasks created, ${skipped} dupes skipped`)
+    } else {
+      log(`${email}: no actionable emails`)
+    }
+  } else {
+    log(`${email}: no emails from real people`)
+  }
+
+  // Phase B: clean junk
+  const { trashed } = await cleanInbox(gmailClient, {
+    user:          email,
+    olderThanDays: Number(process.env.CLEAN_OLDER_THAN_DAYS || 7),
+  })
+  log(`${email}: ${trashed} junk emails trashed`)
+}
+
+// ── Main pipeline (all accounts) ──────────────────────────────────────────────
 
 async function pipeline() {
   log('══════════════════════════════════════')
   log('Nightly pipeline: starting')
   log('══════════════════════════════════════')
 
+  // Re-read accounts.json each run so new accounts are picked up without restart
+  let accounts = []
   try {
-    // ── Phase A: Task extraction from Primary inbox ────────────────────────
-
-    // 1. Fetch emails from real people only (Primary, last 24h)
-    const emails = await fetchEmails(gmail, {
-      user:          USER,
-      lookbackHours: Number(process.env.LOOKBACK_HOURS || 24),
-    })
-
-    if (emails.length) {
-      // 2. Classify importance with LLM
-      const actionable = await analyzeEmails(emails, llm, {
-        threshold: Number(process.env.IMPORTANCE_THRESHOLD || 6),
-      })
-
-      if (actionable.length) {
-        // 3. Extract parent tasks + subtasks with LLM
-        const taskGroups = await extractTasks(actionable, llm)
-
-        // 4. Persist to Supabase (deduped by source email ID)
-        const { created, skipped } = await writeTasks(taskGroups, supabase)
-        log(`Tasks: ${created} created, ${skipped} dupes skipped`)
-      } else {
-        log('No actionable emails found in Primary.')
-      }
-    } else {
-      log('No emails from real people in Primary.')
-    }
-
-    // ── Phase B: Inbox cleanup (Spam / Promotions / Social / Updates) ──────
-
-    const { trashed } = await cleanInbox(gmail, {
-      user:          USER,
-      olderThanDays: Number(process.env.CLEAN_OLDER_THAN_DAYS || 7),
-    })
-
-    log('══════════════════════════════════════')
-    log(`Pipeline complete — ${trashed} junk emails trashed`)
-    log('══════════════════════════════════════')
-  } catch (e) {
-    err('Pipeline error:', e.message)
-    err(e.stack)
+    accounts = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf-8'))
+  } catch {
+    err('Could not read agents/accounts.json')
+    return
   }
+
+  let totalTrashed = 0
+  for (const account of accounts) {
+    try {
+      await runForAccount(account)
+    } catch (e) {
+      err(`${account.email} failed:`, e.message)
+    }
+  }
+
+  log('══════════════════════════════════════')
+  log(`Pipeline complete — ${accounts.length} accounts processed`)
+  log('══════════════════════════════════════')
 }
 
 // ── Scheduler ─────────────────────────────────────────────────────────────────
