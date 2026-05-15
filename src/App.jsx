@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { Analytics } from '@vercel/analytics/react'
 import Sidebar, { Brand } from './components/Sidebar'
 import { TaskList, Composer } from './components/TaskList'
 import Insights from './components/Insights'
@@ -244,6 +245,7 @@ export default function App() {
           <IconBars /> Insights
         </button>
       </nav>
+      <Analytics />
     </div>
   )
 }
