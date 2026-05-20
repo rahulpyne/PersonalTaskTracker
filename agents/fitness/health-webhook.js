@@ -86,37 +86,26 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
-  const date = payload.date || new Date().toISOString().slice(0, 10)
+  // ── Detect Health Auto Export format vs flat format ──────────────
+  // Health Auto Export sends: { data: { metrics: [{ name, units, data: [{qty, date}] }] } }
+  // Flat format (manual/custom):  { date, steps, active_cals, ... }
+  const rows = payload.data?.metrics
+    ? parseHealthAutoExport(payload, payload)
+    : [buildFlatRow(payload)]
 
-  const row = {
-    date,
-    steps:          num(payload.steps),
-    active_cals:    num(payload.active_cals),
-    total_cals:     num(payload.total_cals),
-    exercise_mins:  num(payload.exercise_mins),
-    stand_hours:    num(payload.stand_hours),
-    resting_hr:     num(payload.resting_hr),
-    avg_hr:         num(payload.avg_hr),
-    hrv:            num(payload.hrv),
-    vo2_max:        num(payload.vo2_max),
-    sleep_hrs:      num(payload.sleep_hrs),
-    sleep_deep_hrs: num(payload.sleep_deep_hrs),
-    sleep_rem_hrs:  num(payload.sleep_rem_hrs),
-    raw:            payload,
+  let saved = 0
+  for (const row of rows) {
+    const { error } = await supabase
+      .from('fitness_daily_metrics')
+      .upsert(row, { onConflict: 'date' })
+
+    if (error) warn(`HealthWebhook: DB error (${row.date}) — ${error.message}`)
+    else {
+      log(`HealthWebhook: ✅ ${row.date} — steps=${row.steps ?? '?'} hrv=${row.hrv ?? '?'} restHR=${row.resting_hr ?? '?'} exerciseMins=${row.exercise_mins ?? '?'}`)
+      saved++
+    }
   }
-
-  const { error } = await supabase
-    .from('fitness_daily_metrics')
-    .upsert(row, { onConflict: 'date' })
-
-  if (error) {
-    warn(`HealthWebhook: DB error — ${error.message}`)
-    res.writeHead(500)
-    res.end('db error')
-    return
-  }
-
-  log(`HealthWebhook: ✅ metrics saved for ${date} — steps=${row.steps ?? '?'} sleep=${row.sleep_hrs ?? '?'}h hrv=${row.hrv ?? '?'}`)
+  log(`HealthWebhook: saved ${saved}/${rows.length} date rows`)
   res.writeHead(200)
   res.end('ok')
 })
@@ -124,6 +113,78 @@ const server = http.createServer(async (req, res) => {
 function num(v) {
   const n = Number(v)
   return isNaN(n) ? null : n
+}
+
+// ── Flat format (manual shortcut) ─────────────────────────────────────────────
+function buildFlatRow(p) {
+  return {
+    date:           p.date || new Date().toISOString().slice(0, 10),
+    steps:          num(p.steps),
+    active_cals:    num(p.active_cals),
+    total_cals:     num(p.total_cals),
+    exercise_mins:  num(p.exercise_mins),
+    stand_hours:    num(p.stand_hours),
+    resting_hr:     num(p.resting_hr),
+    avg_hr:         num(p.avg_hr),
+    hrv:            num(p.hrv),
+    vo2_max:        num(p.vo2_max),
+    sleep_hrs:      num(p.sleep_hrs),
+    sleep_deep_hrs: num(p.sleep_deep_hrs),
+    sleep_rem_hrs:  num(p.sleep_rem_hrs),
+    raw:            p,
+  }
+}
+
+// ── Health Auto Export format ─────────────────────────────────────────────────
+// Parses the nested metrics array, groups readings by date, aggregates per day.
+// Metric name → column mapping based on Health Auto Export field names.
+function parseHealthAutoExport(payload, rawPayload) {
+  const metrics = payload.data.metrics   // [{ name, units, data: [{qty, date, source}] }]
+
+  // Group raw readings by local date (YYYY-MM-DD from timestamp string)
+  const byDate = {}
+  for (const metric of metrics) {
+    for (const reading of (metric.data || [])) {
+      if (reading.qty == null) continue
+      const dateStr = reading.date.slice(0, 10)   // "2026-05-19 08:59:00 -0700" → "2026-05-19"
+      if (!byDate[dateStr])              byDate[dateStr] = {}
+      if (!byDate[dateStr][metric.name]) byDate[dateStr][metric.name] = []
+      byDate[dateStr][metric.name].push(Number(reading.qty))
+    }
+  }
+
+  const sum  = arr => arr?.length ? arr.reduce((s, v) => s + v, 0) : null
+  const avg  = arr => arr?.length ? arr.reduce((s, v) => s + v, 0) / arr.length : null
+  const last = arr => arr?.length ? arr[arr.length - 1] : null
+  const rnd  = (v, d = 1) => v != null ? +v.toFixed(d) : null
+
+  return Object.entries(byDate).map(([date, r]) => {
+    const activeCals = rnd(sum(r['active_energy']),    0)
+    const basalCals  = rnd(sum(r['basal_energy_burned']), 0)
+    const totalCals  = (activeCals != null && basalCals != null) ? activeCals + basalCals : null
+
+    // Sleep: sleep_analysis comes as hours in "asleep" state
+    const sleepHrs      = rnd(sum(r['sleep_analysis']),        1)
+    const sleepDeepHrs  = rnd(sum(r['sleep_deep']),            1)
+    const sleepRemHrs   = rnd(sum(r['sleep_rem']),             1)
+
+    return {
+      date,
+      steps:          r['step_count']             ? Math.round(sum(r['step_count']))          : null,
+      active_cals:    activeCals,
+      total_cals:     totalCals,
+      exercise_mins:  r['apple_exercise_time']    ? Math.round(sum(r['apple_exercise_time'])) : null,
+      stand_hours:    r['apple_stand_hour']        ? Math.round(sum(r['apple_stand_hour']))    : null,
+      resting_hr:     r['resting_heart_rate']      ? Math.round(avg(r['resting_heart_rate']))  : null,
+      avg_hr:         r['heart_rate']              ? Math.round(avg(r['heart_rate']))          : null,
+      hrv:            r['heart_rate_variability']  ? rnd(avg(r['heart_rate_variability']))     : null,
+      vo2_max:        r['vo2_max']                 ? rnd(last(r['vo2_max']))                   : null,
+      sleep_hrs:      sleepHrs,
+      sleep_deep_hrs: sleepDeepHrs,
+      sleep_rem_hrs:  sleepRemHrs,
+      raw:            rawPayload,  // store full payload once (on first/last date row)
+    }
+  })
 }
 
 server.listen(PORT, () => {
