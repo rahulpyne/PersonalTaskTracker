@@ -39,10 +39,16 @@ export async function run(emails, model, { threshold = 6 } = {}) {
   for (const email of emails) {
     try {
       const res = await jsonPrompt(model, buildPrompt(email))
+      const score      = res.importance ?? 0
+      const isAction   = res.actionable === true
+      const passes     = isAction && score >= threshold
 
-      if (res.actionable === true && (res.importance ?? 0) >= threshold) {
-        actionable.push({ email, importance: res.importance, action_description: res.action_description })
-        log(`EmailAnalyzer: ✓ [${res.importance}/10] "${email.subject}"`)
+      if (passes) {
+        actionable.push({ email, importance: score, action_description: res.action_description })
+        log(`EmailAnalyzer: ✅ PASS  [${score}/10] actionable=${isAction} — "${email.subject}"`)
+        log(`EmailAnalyzer:    action: ${res.action_description}`)
+      } else {
+        log(`EmailAnalyzer: ❌ SKIP  [${score}/10] actionable=${isAction} threshold=${threshold} — "${email.subject}"`)
       }
     } catch (e) {
       warn(`EmailAnalyzer: failed on "${email.subject}" — ${e.message}`)
