@@ -16,12 +16,14 @@ import { createLLMClient }      from './lib/llm.js'
 import { createSupabaseClient } from './lib/supabase.js'
 import { log, warn, err }       from './lib/logger.js'
 
-import { run as fetchEmails }   from './fetcher.js'
-import { run as analyzeEmails } from './analyzer.js'
-import { run as extractTasks }  from './extractor.js'
-import { run as writeTasks }    from './writer.js'
-import { run as cleanInbox }    from './cleaner.js'
-import { run as pruneData }     from './pruner.js'
+import { run as fetchEmails }      from './fetcher.js'
+import { run as analyzeEmails }    from './analyzer.js'
+import { run as extractTasks }     from './extractor.js'
+import { run as writeTasks }       from './writer.js'
+import { run as cleanInbox }       from './cleaner.js'
+import { run as pruneData }        from './pruner.js'
+import { run as pullStrava }       from './fitness/strava-puller.js'
+import { run as generateInsights } from './fitness/insight-generator.js'
 
 const __dir          = path.dirname(fileURLToPath(import.meta.url))
 const ACCOUNTS_FILE  = path.join(__dir, 'accounts.json')
@@ -120,12 +122,29 @@ async function pipeline() {
     }
   }
 
-  // Phase C: prune old data (runs once per nightly job, not per account)
-  // Anonymises completed tasks and hard-deletes subtasks/stale-open tasks
-  // older than RETENTION_DAYS — preserves all metric fields intact.
+  // Phase C: prune old task data (runs once per nightly job)
   await pruneData(supabase, {
     retentionDays: Number(process.env.RETENTION_DAYS || 90),
   })
+
+  // Phase D: sync Strava activities (nightly)
+  try {
+    await pullStrava(supabase, {
+      lookbackDays: Number(process.env.STRAVA_LOOKBACK_DAYS || 7),
+    })
+  } catch (e) {
+    warn('StravaFetcher failed:', e.message)
+  }
+
+  // Phase E: generate fitness insights (Sundays only — weekly)
+  const dayOfWeek = new Date().getDay()  // 0 = Sunday
+  if (dayOfWeek === 0 || process.argv.includes('--insights')) {
+    try {
+      await generateInsights(supabase, llm)
+    } catch (e) {
+      warn('FitnessInsights failed:', e.message)
+    }
+  }
 
   log('══════════════════════════════════════')
   log(`Pipeline complete — ${accounts.length} accounts processed`)

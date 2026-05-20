@@ -59,6 +59,9 @@ export default function Sidebar({ view, setView, cat, setCat, tasks, history }) 
         <button className={`side-item ${view === 'insights' ? 'active' : ''}`} onClick={() => setView('insights')}>
           <IconBars size={15} /> Insights
         </button>
+        <button className={`side-item ${view === 'fitness' ? 'active' : ''}`} onClick={() => setView('fitness')}>
+          ⚡ Fitness
+        </button>
       </div>
 
       <div className="side-section">

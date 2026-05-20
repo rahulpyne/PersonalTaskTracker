@@ -4,6 +4,7 @@ import { TaskList, Composer } from './components/TaskList'
 import Insights from './components/Insights'
 import { ReactiveAvatar } from './components/Avatar'
 import { IconList, IconBars, CatIcon } from './components/Icons'
+import Fitness from './pages/Fitness'
 import { toUI, toDB, toDBToggle } from './lib/adapter'
 import { buildHistory } from './lib/history'
 import { fetchTasks, createTask, updateTask, deleteTask, clearCompleted, subscribeToTasks } from './lib/tasks'
@@ -211,7 +212,7 @@ export default function App() {
               <Composer onAdd={onAdd} defaultCat={cat === 'personal' ? 'personal' : 'work'} />
             </div>
           </>
-        ) : (
+        ) : view === 'insights' ? (
           <>
             <div className="head">
               <div>
@@ -230,6 +231,21 @@ export default function App() {
               <Insights tasks={tasks} history={history} />
             </div>
           </>
+        ) : (
+          <>
+            <div className="head">
+              <div>
+                <h1>Fitness</h1>
+                <div style={{ marginTop: 8, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', letterSpacing: '.04em' }}>
+                  STRAVA · APPLE HEALTH · WEEKLY PLAN
+                </div>
+              </div>
+              <ReactiveAvatar tasks={tasks} history={history} />
+            </div>
+            <div className="scroll">
+              <Fitness />
+            </div>
+          </>
         )}
       </main>
 
@@ -240,6 +256,9 @@ export default function App() {
         </button>
         <button className={view === 'insights' ? 'active' : ''} onClick={() => setView('insights')}>
           <IconBars /> Insights
+        </button>
+        <button className={view === 'fitness' ? 'active' : ''} onClick={() => setView('fitness')}>
+          ⚡ Fitness
         </button>
       </nav>
     </div>
