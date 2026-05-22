@@ -8,7 +8,11 @@
     "run-insights":     "node orchestrator.js --now --insights",
     "setup-oauth":      "node setup-oauth.js",
     "setup-strava":     "node fitness/strava-oauth.js",
-    "health-webhook":   "node fitness/health-webhook.js"
+    "health-webhook":   "node fitness/health-webhook.js",
+    "gymverse-webhook": "node fitness/gymverse-webhook.js",
+    "scrape-lifts":     "node fitness/strava-lift-scraper.js",
+    "scrape-lifts:90":  "node fitness/strava-lift-scraper.js --days=90",
+    "scrape-lifts:dry": "node fitness/strava-lift-scraper.js --days=90 --dry-run"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

@@ -100,6 +100,7 @@ export async function run(supabase, { lookbackDays = 7 } = {}) {
         max_hr:           a.max_heartrate     ? Math.round(a.max_heartrate)     : null,
         calories:         a.calories          || null,
         avg_speed_kmh:    a.average_speed     ? +(a.average_speed * 3.6).toFixed(2) : null,
+        // summary_polyline, start_latlng, end_latlng are not separate columns — they live inside raw JSONB
         raw:              a,
       }
 

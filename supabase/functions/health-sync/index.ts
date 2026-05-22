@@ -75,6 +75,12 @@ Deno.serve(async (req: Request) => {
 
 // ── Flat format (manual shortcut) ─────────────────────────────────────────────
 function buildFlatRow(p: Record<string, unknown>) {
+  // Weight: accept weight_lbs (Apple Health shows lbs for US locale) or weight_kg directly
+  const weightKg: number | null =
+    p.weight_kg  ? rnd(num(p.weight_kg)!)          :  // already in kg
+    p.weight_lbs ? rnd(num(p.weight_lbs)! / 2.205) :  // convert from lbs
+    null
+
   return {
     date:           (p.date as string) || new Date().toISOString().slice(0, 10),
     steps:          num(p.steps),
@@ -89,6 +95,7 @@ function buildFlatRow(p: Record<string, unknown>) {
     sleep_hrs:      num(p.sleep_hrs),
     sleep_deep_hrs: num(p.sleep_deep_hrs),
     sleep_rem_hrs:  num(p.sleep_rem_hrs),
+    weight_kg:      weightKg,
     raw:            p,
   }
 }
@@ -120,6 +127,21 @@ function parseHealthAutoExport(payload: Record<string, unknown>) {
     const activeCals = r['active_energy']       ? Math.round(sum(r['active_energy'])!) : null
     const basalCals  = r['basal_energy_burned'] ? Math.round(sum(r['basal_energy_burned'])!) : null
 
+    // body_mass: Health Auto Export exports in kg when metric, lbs when imperial.
+    // We normalise to kg. HAE label is 'body_mass'; units field on the metric tells us.
+    // Since we can't inspect units per-date here, we store the raw value and rely on
+    // the metric-level units from the outer payload (handled below).
+    const rawBodyMass = r['body_mass'] ? last(r['body_mass']) : null
+
+    // Detect unit by checking the metrics array in the original payload
+    let weightKg: number | null = null
+    if (rawBodyMass != null) {
+      const bmMetric = ((payload as any).data?.metrics as Array<{ name: string; units: string }> | undefined)
+        ?.find(m => m.name === 'body_mass')
+      const units = bmMetric?.units?.toLowerCase() ?? ''
+      weightKg = units.includes('lb') ? rnd(rawBodyMass / 2.205) : rnd(rawBodyMass)
+    }
+
     return {
       date,
       steps:          r['step_count']              ? Math.round(sum(r['step_count'])!) : null,
@@ -134,6 +156,7 @@ function parseHealthAutoExport(payload: Record<string, unknown>) {
       sleep_hrs:      r['sleep_analysis']           ? rnd(sum(r['sleep_analysis'])) : null,
       sleep_deep_hrs: r['sleep_deep']               ? rnd(sum(r['sleep_deep'])) : null,
       sleep_rem_hrs:  r['sleep_rem']                ? rnd(sum(r['sleep_rem'])) : null,
+      weight_kg:      weightKg,
       raw:            payload,
     }
   })
@@ -142,4 +165,8 @@ function parseHealthAutoExport(payload: Record<string, unknown>) {
 function num(v: unknown): number | null {
   const n = Number(v)
   return isNaN(n) ? null : n
+}
+
+function rnd(v: number | null, d = 2): number | null {
+  return v != null ? +v.toFixed(d) : null
 }

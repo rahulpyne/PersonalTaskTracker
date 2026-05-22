@@ -31,7 +31,7 @@ const fmt = {
   hrv: (v) => v != null ? v + ' ms' : 'N/A',
 }
 
-function buildPrompt({ activities, metrics, goals, prevSummary }) {
+function buildPrompt({ activities, metrics, goals, gymWorkouts, exercisePRs, prevSummary }) {
   const totalDistM  = sum(activities, 'distance_m')
   const activeDays  = new Set(activities.map(a => a.started_at.slice(0, 10))).size
   const avgHRV      = mean(metrics, 'hrv')
@@ -55,19 +55,47 @@ function buildPrompt({ activities, metrics, goals, prevSummary }) {
     (g.target_date ? ` by ${g.target_date}` : '')
   ).join('\n') || '  (no active goals)'
 
+  // ── Strength section ─────────────────────────────────────────────────────────
+  const strengthSessions = gymWorkouts.length
+  const totalVolumeLbs   = gymWorkouts.reduce((s, w) => s + (w.total_volume_lbs || 0), 0)
+
+  const gymLines = gymWorkouts.map(w => {
+    const exList = (w.exercises || [])
+      .filter(e => e.top_set_weight_lbs)
+      .map(e => `${e.name} ${e.top_set_weight_lbs}lbs×${e.top_set_reps ?? '?'}`)
+      .join(', ')
+    return `  • ${w.workout_date || w.started_at?.slice(0,10)} "${w.workout_name}": ` +
+      `vol=${Math.round(totalVolumeLbs / Math.max(1, strengthSessions)).toLocaleString()}lbs avg` +
+      (exList ? ` | ${exList}` : '')
+  }).join('\n') || '  (no strength sessions this week)'
+
+  const prLines = exercisePRs
+    .filter(p => p.best_weight_lbs)
+    .sort((a, b) => (b.best_weight_lbs || 0) - (a.best_weight_lbs || 0))
+    .slice(0, 8)
+    .map(p => `  • ${p.exercise_name}: ${p.best_weight_lbs} lbs × ${p.best_reps ?? '?'} reps (all-time PR, achieved ${p.achieved_at ?? 'recently'})`)
+    .join('\n') || '  (no PR data yet)'
+
   return `
 You are a personal fitness coach reviewing the past 7 days of data for an athlete.
 
 WEEK OVERVIEW:
   Total distance   : ${fmt.km(totalDistM)}
   Activities       : ${activities.length} across ${activeDays} active days
+  Strength sessions: ${strengthSessions} (total volume this week: ${Math.round(totalVolumeLbs).toLocaleString()} lbs)
   Avg daily steps  : ${avgSteps ?? 'N/A'}
   Avg sleep        : ${avgSleep != null ? avgSleep + ' h/night' : 'N/A'}
   Avg resting HR   : ${fmt.hr(avgRestHR)}
   Avg HRV          : ${fmt.hrv(avgHRV)}
 
-ACTIVITIES (past 7 days):
+CARDIO / GENERAL ACTIVITIES (past 7 days):
 ${actLines}
+
+STRENGTH WORKOUTS (past 7 days — top set per exercise):
+${gymLines}
+
+ALL-TIME PERSONAL RECORDS (for context when writing strength insights):
+${prLines}
 
 DAILY HEALTH METRICS:
 ${metLines}
@@ -79,30 +107,33 @@ ${prevSummary ? `LAST WEEK SUMMARY (for context): ${prevSummary}` : ''}
 
 Generate a response as valid JSON with exactly this shape:
 {
-  "summary": "2-3 sentence paragraph summarising the week — tone: coach-like, positive but honest",
+  "summary": "2-3 sentence paragraph summarising the week — cover both cardio AND strength — tone: coach-like, positive but honest",
   "highlights": {
-    "totalKm":   ${(totalDistM / 1000).toFixed(1)},
-    "activeDays": ${activeDays},
-    "avgSteps":  ${avgSteps ?? 0},
-    "avgSleep":  ${avgSleep ?? 0},
-    "avgHRV":    ${avgHRV ?? 0},
-    "avgRestHR": ${avgRestHR ?? 0}
+    "totalKm":        ${(totalDistM / 1000).toFixed(1)},
+    "activeDays":     ${activeDays},
+    "strengthSessions": ${strengthSessions},
+    "totalVolumeLbs": ${Math.round(totalVolumeLbs)},
+    "avgSteps":       ${avgSteps ?? 0},
+    "avgSleep":       ${avgSleep ?? 0},
+    "avgHRV":         ${avgHRV ?? 0},
+    "avgRestHR":      ${avgRestHR ?? 0}
   },
   "insights": [
-    "Specific, data-backed insight (e.g. 'HRV up 8% vs last week — recovery improving')",
-    "Another insight referencing actual numbers",
-    "Third insight — could be about sleep/training balance, consistency, load trends"
+    "Specific, data-backed insight about cardio or running (e.g. pace trend, distance, HR zones)",
+    "Specific strength insight — reference actual lifts, weights, volume (e.g. 'Bench hit 215 lbs × 3 this week — 93rd percentile of adults')",
+    "Recovery / readiness insight — HRV, sleep, resting HR trends",
+    "Balance or progression insight — how cardio and strength complement each other this week"
   ],
   "goalProgress": [
     {
       "goalTitle": "...",
       "status": "on_track | ahead | behind | no_data",
-      "assessment": "One sentence — e.g. 'You logged 22 km, 73% of your 30 km weekly target'",
+      "assessment": "One sentence referencing actual numbers",
       "recommendation": "What to adjust next week"
     }
   ],
   "weeklyPlan": {
-    "monday":    { "type": "run|ride|swim|strength|yoga|cardio|rest", "durationMins": 0, "notes": "Concise instruction" },
+    "monday":    { "type": "run|ride|swim|strength|yoga|cardio|rest", "durationMins": 0, "notes": "Concise instruction — reference specific exercises or targets where relevant" },
     "tuesday":   { "type": "...", "durationMins": 0, "notes": "..." },
     "wednesday": { "type": "...", "durationMins": 0, "notes": "..." },
     "thursday":  { "type": "...", "durationMins": 0, "notes": "..." },
@@ -113,9 +144,10 @@ Generate a response as valid JSON with exactly this shape:
 }
 
 Rules:
-- insights must reference actual numbers from the data
-- weeklyPlan must be realistic given this week's load and recovery indicators
-- if no activity data exists, still produce a starter plan appropriate for a beginner
+- insights MUST reference actual numbers from the data — no generic advice
+- at least one insight must mention a specific lift and weight from the strength data
+- weeklyPlan must be realistic given this week's load, recovery, and the athlete's established lift patterns
+- if no strength data exists, focus entirely on cardio and recovery
 `.trim()
 }
 
@@ -155,6 +187,18 @@ export async function run(supabase, llm) {
     .select('*')
     .eq('status', 'active')
 
+  // Gymverse strength workouts this week
+  const { data: gymWorkouts } = await supabase
+    .from('gymverse_workouts')
+    .select('workout_name,workout_date,started_at,total_volume_lbs,exercises')
+    .gte('workout_date', weekStartISO)
+    .order('workout_date', { ascending: false })
+
+  // All-time exercise PRs (for strength context in the summary)
+  const { data: exercisePRs } = await supabase
+    .from('gymverse_exercise_prs')
+    .select('exercise_name,best_weight_lbs,best_reps,achieved_at,canonical_key')
+
   // Last week's summary for context
   const { data: prev } = await supabase
     .from('fitness_insights')
@@ -164,18 +208,20 @@ export async function run(supabase, llm) {
     .limit(1)
     .maybeSingle()
 
-  log(`FitnessInsights: ${activities?.length ?? 0} activities · ${metrics?.length ?? 0} metric days · ${goals?.length ?? 0} goals`)
+  log(`FitnessInsights: ${activities?.length ?? 0} activities · ${metrics?.length ?? 0} metric days · ${goals?.length ?? 0} goals · ${gymWorkouts?.length ?? 0} strength sessions`)
 
-  if (!activities?.length && !metrics?.length) {
+  if (!activities?.length && !metrics?.length && !gymWorkouts?.length) {
     log('FitnessInsights: no data yet — skipping until Strava/Apple Health are connected')
     return
   }
 
   try {
     const insight = await jsonPrompt(llm, buildPrompt({
-      activities:  activities  ?? [],
-      metrics:     metrics     ?? [],
-      goals:       goals       ?? [],
+      activities:  activities   ?? [],
+      metrics:     metrics      ?? [],
+      goals:       goals        ?? [],
+      gymWorkouts: gymWorkouts  ?? [],
+      exercisePRs: exercisePRs  ?? [],
       prevSummary: prev?.summary ?? null,
     }))
 

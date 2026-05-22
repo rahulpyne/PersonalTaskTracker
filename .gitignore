@@ -10,3 +10,9 @@ agents/.env
 agents/.env:
 agents/.env::*
 agents/accounts.json
+
+# Strava OAuth tokens (contain live access/refresh tokens)
+agents/fitness/strava-config.json
+
+# Supabase temp files
+supabase/.temp/

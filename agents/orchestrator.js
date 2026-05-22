@@ -23,6 +23,7 @@ import { run as writeTasks }       from './writer.js'
 import { run as cleanInbox }       from './cleaner.js'
 import { run as pruneData }        from './pruner.js'
 import { run as pullStrava }       from './fitness/strava-puller.js'
+import { run as scrapeLifts }      from './fitness/strava-lift-scraper.js'
 import { run as generateInsights } from './fitness/insight-generator.js'
 
 const __dir          = path.dirname(fileURLToPath(import.meta.url))
@@ -128,12 +129,19 @@ async function pipeline() {
   })
 
   // Phase D: sync Strava activities (nightly)
+  const stravaLookback = Number(process.env.STRAVA_LOOKBACK_DAYS || 7)
   try {
-    await pullStrava(supabase, {
-      lookbackDays: Number(process.env.STRAVA_LOOKBACK_DAYS || 7),
-    })
+    await pullStrava(supabase, { lookbackDays: stravaLookback })
   } catch (e) {
     warn('StravaFetcher failed:', e.message)
+  }
+
+  // Phase D2: scrape lift photos from Strava and push into gymverse_workouts
+  // Runs automatically after every Strava pull — idempotent via external_id dedup
+  try {
+    await scrapeLifts(supabase, { lookbackDays: stravaLookback })
+  } catch (e) {
+    warn('StravaLiftScraper failed:', e.message)
   }
 
   // Phase E: generate fitness insights (Sundays only — weekly)

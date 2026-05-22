@@ -373,3 +373,53 @@ input, textarea { font: inherit; color: inherit; background: transparent; border
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
+
+/* ── Fitness Dashboard dark theme scope ───────────────────────────────────── */
+.fd {
+  --fd-bg:      #161412;
+  --fd-surface: #1d1a17;
+  --fd-line:    rgba(255,255,255,0.06);
+  --fd-ink1:    #f7f5f1;
+  --fd-ink2:    #b8b1a5;
+  --fd-ink3:    #79716a;
+  --fd-serif:   "Instrument Serif", "Times New Roman", serif;
+  --fd-mono:    "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --fd-sans:    "Helvetica Neue", Helvetica, Arial, sans-serif;
+  /* re-map app tokens for dark use */
+  --good:  oklch(75% 0.14 160);
+  --warn:  oklch(78% 0.18 75);
+  --bad:   oklch(68% 0.18 25);
+}
+.fd { font-family: var(--fd-sans); color: var(--fd-ink1); background: var(--fd-bg); }
+.fd button { font-family: var(--fd-sans); }
+.fd ::selection { background: oklch(75% 0.18 50 / .35); }
+
+/* Heatmap wrapper needs position:relative for tooltip positioning */
+.fd-heatmap-wrap { position: relative; }
+
+/* Responsive grid adjustments for dashboard */
+@media (max-width: 1100px) {
+  .fd .fd-herostats { grid-template-columns: repeat(3, 1fr) !important; }
+}
+@media (max-width: 860px) {
+  .fd .fd-herostats { grid-template-columns: repeat(2, 1fr) !important; }
+  .fd .fd-twocol   { grid-template-columns: 1fr !important; }
+  .fd .fd-plan     { grid-template-columns: repeat(4, 1fr) !important; }
+}
+@media (max-width: 560px) {
+  .fd .fd-plan     { grid-template-columns: repeat(2, 1fr) !important; }
+  .fd .fd-goals    { grid-template-columns: 1fr !important; }
+}
+
+/* Leaflet dark-mode overrides inside .fd */
+.fd .leaflet-container { background: #0e0c0a; }
+.fd .leaflet-control-zoom a { background: rgba(30,28,24,0.9); color: #b8b1a5; border-color: rgba(255,255,255,0.1); }
+.fd .leaflet-control-zoom a:hover { background: rgba(50,46,40,0.95); color: #f7f5f1; }
+.fd .leaflet-control-attribution { background: rgba(14,12,10,0.7) !important; color: rgba(255,255,255,0.3) !important; font-size: 9px; }
+.fd .leaflet-control-attribution a { color: rgba(255,255,255,0.4) !important; }
+
+/* Ticker marquee animation */
+@keyframes fd-ticker {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}

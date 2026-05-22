@@ -65,7 +65,7 @@ const fmtMin  = (s)  => s  != null ? Math.round(s / 60) + ' min'   : '—'
 const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString('en', { month: 'short', day: 'numeric' }) : '—'
 
 // ── Component ──────────────────────────────────────────────────────────────────
-export default function Fitness() {
+export default function Fitness({ onOpenDashboard }) {
   const { data, loading, error } = useFitnessData()
 
   const mono = { fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', letterSpacing: '.04em' }
@@ -87,6 +87,28 @@ export default function Fitness() {
 
   return (
     <div style={{ padding: '0 0 48px' }}>
+
+      {/* ── Dashboard link ── */}
+      {onOpenDashboard && (
+        <div style={{ padding: '14px 24px 0' }}>
+          <button onClick={onOpenDashboard} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 10,
+            background: 'oklch(0.22 0.01 80)', color: 'oklch(0.985 0.004 80)',
+            border: 'none', borderRadius: 10, padding: '10px 18px',
+            fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '.12em',
+            textTransform: 'uppercase', cursor: 'pointer',
+            transition: 'opacity .18s', opacity: 1,
+          }}
+          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+          >
+            <span style={{ fontSize: 14 }}>⚡</span>
+            Open Visual Dashboard
+            <span style={{ opacity: 0.5 }}>→</span>
+          </button>
+          <span style={{ ...mono, marginLeft: 14 }}>Animated charts · sport figures · goals · plan</span>
+        </div>
+      )}
 
       {/* ── Connection status ── */}
       <div style={{ ...card, display: 'flex', gap: 24 }}>

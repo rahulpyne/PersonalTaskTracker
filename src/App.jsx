@@ -4,7 +4,7 @@ import { TaskList, Composer } from './components/TaskList'
 import Insights from './components/Insights'
 import { ReactiveAvatar } from './components/Avatar'
 import { IconList, IconBars, CatIcon } from './components/Icons'
-import Fitness from './pages/Fitness'
+import FitnessDashboard from './pages/FitnessDashboard'
 import { toUI, toDB, toDBToggle } from './lib/adapter'
 import { buildHistory } from './lib/history'
 import { fetchTasks, createTask, updateTask, deleteTask, clearCompleted, subscribeToTasks } from './lib/tasks'
@@ -232,20 +232,9 @@ export default function App() {
             </div>
           </>
         ) : (
-          <>
-            <div className="head">
-              <div>
-                <h1>Fitness</h1>
-                <div style={{ marginTop: 8, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', letterSpacing: '.04em' }}>
-                  STRAVA · APPLE HEALTH · WEEKLY PLAN
-                </div>
-              </div>
-              <ReactiveAvatar tasks={tasks} history={history} />
-            </div>
-            <div className="scroll">
-              <Fitness />
-            </div>
-          </>
+          <div className="scroll" style={{ overflow: 'auto' }}>
+            <FitnessDashboard />
+          </div>
         )}
       </main>
 
