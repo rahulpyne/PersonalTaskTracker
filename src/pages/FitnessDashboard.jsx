@@ -221,27 +221,29 @@ function useDashboardData() {
           .reduce((s,a) => s + (a.distance_m||0), 0) / 1000).toFixed(1)
 
         // Build goal rows with computed current values
+        // slug is the stable text key used for upsert (id column is UUID, not text)
         const autoGoals = [
-          { id:'auto:run_month',      title:`Run distance — ${monthName}`,        type:'run',      unit:'km',  target_value:100,    current_value:monthRunKm,   target_date:monthEnd, status:'active' },
-          { id:'auto:strength_month', title:`Lift volume — ${monthName}`,          type:'strength', unit:'lbs', target_value:110000, current_value:monthVolLbs,  target_date:monthEnd, status:'active' },
-          { id:'auto:strength_week',  title:'Strength sessions — this week',       type:'strength', unit:'sessions', target_value:4, current_value:weekSessions, target_date:null,     status:'active' },
-          { id:'auto:run_week',       title:'Run distance — this week',            type:'run',      unit:'km',  target_value:25,     current_value:weekRunKm,    target_date:null,     status:'active' },
+          { slug:'auto:run_month',      title:`Run distance — ${monthName}`,      type:'run',      unit:'km',       target_value:100,    current_value:monthRunKm,   target_date:monthEnd, status:'active' },
+          { slug:'auto:strength_month', title:`Lift volume — ${monthName}`,        type:'strength', unit:'lbs',      target_value:110000, current_value:monthVolLbs,  target_date:monthEnd, status:'active' },
+          { slug:'auto:strength_week',  title:'Strength sessions — this week',     type:'strength', unit:'sessions', target_value:4,      current_value:weekSessions, target_date:null,     status:'active' },
+          { slug:'auto:run_week',       title:'Run distance — this week',          type:'run',      unit:'km',       target_value:25,     current_value:weekRunKm,    target_date:null,     status:'active' },
         ]
 
-        // Merge with any custom DB goals (DB takes priority for title/target)
-        const dbGoals = (goalsR.data ?? []).filter(g => ['run','strength'].includes(g.type))
+        // Merge with any custom DB goals (DB takes priority for title/target, we keep live current_value)
+        const dbGoals = (goalsR.data ?? [])
         const mergedGoals = autoGoals.map(ag => {
-          const db = dbGoals.find(g => g.id === ag.id)
+          const db = dbGoals.find(g => g.slug === ag.slug || g.id === ag.slug)
           return db ? { ...ag, ...db, current_value: ag.current_value } : ag
         })
         // Append any DB goals not in autoGoals
-        dbGoals.forEach(g => { if (!mergedGoals.find(m => m.id === g.id)) mergedGoals.push({...g, current_value:g.current_value??0}) })
+        dbGoals.forEach(g => { if (!mergedGoals.find(m => m.slug === g.slug)) mergedGoals.push({...g, current_value:g.current_value??0}) })
 
         const goals = mergedGoals.map(g => ({...g, current: g.current_value ?? 0}))
 
         // Upsert computed goals back to DB so insight-generator sees real numbers
+        // Use slug as the conflict target (unique text column) — id is auto-generated UUID
         const upsertRows = autoGoals.map(g => ({
-          id:            g.id,
+          slug:          g.slug,
           title:         g.title,
           type:          g.type,
           unit:          g.unit,
@@ -250,7 +252,7 @@ function useDashboardData() {
           target_date:   g.target_date,
           status:        'active',
         }))
-        supabase.from('fitness_goals').upsert(upsertRows, {onConflict:'id'}).then(({error}) => {
+        supabase.from('fitness_goals').upsert(upsertRows, {onConflict:'slug'}).then(({error}) => {
           if (error) console.warn('goals upsert:', error.message)
         })
 
@@ -1186,7 +1188,7 @@ function Goals({goals}) {
           : String(Math.round(v))
 
         return (
-          <motion.div key={g.id}
+          <motion.div key={g.slug ?? g.id}
             initial={{opacity:0, y:12}} whileInView={{opacity:1, y:0}}
             viewport={{once:true, amount:0.4}}
             transition={{duration:0.45, delay:i*0.08, ease:[0.2,0.7,0.2,1]}}
