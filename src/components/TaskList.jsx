@@ -1,12 +1,16 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { IconCheck, IconPencil, IconTrash, IconPlus } from './Icons'
+import { fetchSubtasks, toggleSubtask, generateSubtasks } from '../lib/tasks'
+import { subtaskToUI } from '../lib/adapter'
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function prettyDate(ms) {
   if (!ms) return ''
-  const d = new Date(ms)
+  const d   = new Date(ms)
   const now = new Date(); now.setHours(0, 0, 0, 0)
   const yest = new Date(now); yest.setDate(yest.getDate() - 1)
-  const dd = new Date(d); dd.setHours(0, 0, 0, 0)
+  const dd  = new Date(d); dd.setHours(0, 0, 0, 0)
   if (dd.getTime() === now.getTime())  return 'today'
   if (dd.getTime() === yest.getTime()) return 'yesterday'
   const days = Math.round((now - dd) / 86_400_000)
@@ -14,8 +18,219 @@ function prettyDate(ms) {
   return d.toLocaleDateString('en', { month: 'short', day: 'numeric' })
 }
 
+// Parse 🔗 [Title](URL) markdown links from notes
+function parseLinks(notes) {
+  if (!notes) return []
+  const md = [...notes.matchAll(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g)]
+  if (md.length) return md.map(m => ({ title: m[1], url: m[2] }))
+  const bare = [...notes.matchAll(/https?:\/\/[^\s,)>]+/g)]
+  return bare.map(m => {
+    try { return { title: new URL(m[0]).hostname.replace('www.', ''), url: m[0] } } catch { return null }
+  }).filter(Boolean)
+}
+
+function stripLinks(notes) {
+  return (notes || '').replace(/🔗\s*/g, '').replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, '').trim()
+}
+
+// ── WeightDots ────────────────────────────────────────────────────────────────
+function WeightDots({ weight = 2, done = false }) {
+  const col = done
+    ? 'var(--ink-3)'
+    : weight === 3 ? 'var(--good)' : weight === 2 ? 'var(--warn)' : 'var(--bad)'
+  return (
+    <span className="weight-dots" title={`Satisfaction impact: ${weight}/3`}>
+      {[1, 2, 3].map(i => (
+        <span key={i} className="dot" style={{
+          background: i <= weight && !done ? col : 'var(--line-2)',
+          opacity: done ? 0.4 : 1,
+        }} />
+      ))}
+    </span>
+  )
+}
+
+// ── SparkleIcon ───────────────────────────────────────────────────────────────
+function SparkleIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden>
+      <path d="M8 .5 L9.4 6.1 L15 7 L9.4 7.9 L8 13.5 L6.6 7.9 L1 7 L6.6 6.1 Z"/>
+      <path d="M13 .5 L13.5 2.5 L15.5 3 L13.5 3.5 L13 5.5 L12.5 3.5 L10.5 3 L12.5 2.5 Z" opacity=".55"/>
+      <path d="M2.5 10.5 L2.9 12 L4.5 12.5 L2.9 13 L2.5 14.5 L2.1 13 L.5 12.5 L2.1 12 Z" opacity=".45"/>
+    </svg>
+  )
+}
+
+// ── SubtaskItem ───────────────────────────────────────────────────────────────
+function SubtaskItem({ sub, onToggle }) {
+  const links    = parseLinks(sub.notes)
+  const noteText = stripLinks(sub.notes)
+  const pLabel   = sub.prio === 'high' ? 'H' : sub.prio === 'medium' ? 'M' : 'L'
+  const pClass   = `subtask-prio prio-${sub.prio === 'high' ? 'high' : sub.prio === 'medium' ? 'med' : 'low'}`
+
+  return (
+    <div className={`subtask-item ${sub.done ? 'done' : ''}`}
+         style={{ animationDelay: `${sub.position * 40}ms` }}>
+      <button
+        className="subtask-check"
+        onClick={() => onToggle(sub.id, !sub.done)}
+        aria-label={sub.done ? 'Mark incomplete' : 'Mark complete'}
+      >
+        <IconCheck size={9} />
+      </button>
+
+      <div className="subtask-body">
+        <span className="subtask-title">{sub.title}</span>
+
+        {links.length > 0 && (
+          <div className="subtask-links">
+            {links.map((l, i) => (
+              <a key={i} href={l.url} target="_blank" rel="noopener noreferrer"
+                 className="link-chip" onClick={e => e.stopPropagation()}>
+                <svg viewBox="0 0 24 24" width="10" height="10" fill="none"
+                     stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                </svg>
+                {l.title}
+              </a>
+            ))}
+          </div>
+        )}
+
+        {noteText && !links.length && (
+          <span className="subtask-note">{noteText}</span>
+        )}
+      </div>
+
+      <div className="subtask-meta">
+        <span className={pClass}>{pLabel}</span>
+        <WeightDots weight={sub.weight} done={sub.done} />
+      </div>
+    </div>
+  )
+}
+
+// ── SubtaskPanel ──────────────────────────────────────────────────────────────
+function SubtaskPanel({ task, visible }) {
+  const [subs,       setSubs]       = useState([])
+  const [loading,    setLoading]    = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [error,      setError]      = useState(null)
+  const [loaded,     setLoaded]     = useState(false)
+
+  useEffect(() => {
+    if (!visible || loaded) return
+    setLoading(true)
+    fetchSubtasks(task.id)
+      .then(rows => { setSubs(rows.map(subtaskToUI)); setLoaded(true) })
+      .catch(e  => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [visible, loaded, task.id])
+
+  const handleGenerate = useCallback(async () => {
+    setGenerating(true)
+    setError(null)
+    try {
+      const rows = await generateSubtasks({
+        taskId: task.id, taskTitle: task.title,
+        taskCategory: task.cat, taskNotes: task.notes,
+      })
+      setSubs(rows.map(subtaskToUI))
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setGenerating(false)
+    }
+  }, [task])
+
+  const handleToggle = useCallback(async (id, done) => {
+    setSubs(prev => prev.map(s => s.id === id ? { ...s, done } : s))
+    try { await toggleSubtask(id, done) }
+    catch { setSubs(prev => prev.map(s => s.id === id ? { ...s, done: !done } : s)) }
+  }, [])
+
+  if (!visible) return null
+
+  const pending = subs.filter(s => !s.done)
+  const done    = subs.filter(s =>  s.done)
+  const pct     = subs.length ? Math.round((done.length / subs.length) * 100) : 0
+
+  return (
+    <div className="subtask-panel">
+
+      {/* Header */}
+      <div className="subtask-header">
+        <span className="subtask-label">
+          {subs.length > 0
+            ? <>{pending.length} step{pending.length !== 1 ? 's' : ''} left · <b>{pct}%</b> done</>
+            : 'AI sub-tasks'}
+        </span>
+
+        <button
+          className={`ai-gen-btn ${generating ? 'generating' : ''}`}
+          onClick={handleGenerate}
+          disabled={generating}
+          title={subs.length > 0 ? 'Regenerate with AI' : 'Break into steps with AI'}
+        >
+          {generating
+            ? <><span className="ai-spinner" />Thinking…</>
+            : <><SparkleIcon />{subs.length > 0 ? 'Regenerate' : 'Break it down'}</>
+          }
+        </button>
+      </div>
+
+      {error && <div className="subtask-error">⚠ {error}</div>}
+
+      {/* Skeleton while loading */}
+      {loading && (
+        <div className="subtask-skeleton">
+          {[68, 82, 55].map((w, i) => (
+            <div key={i} className="skel-row">
+              <div className="skel-check" />
+              <div className="skel-line" style={{ width: `${w}%` }} />
+              <div className="skel-badge" />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* List */}
+      {!loading && subs.length > 0 && (
+        <>
+          {/* Progress bar */}
+          <div className="subtask-progress-track">
+            <div className="subtask-progress-fill" style={{ width: `${pct}%` }} />
+          </div>
+
+          <div className="subtask-list">
+            {pending.map(s => <SubtaskItem key={s.id} sub={s} onToggle={handleToggle} />)}
+
+            {done.length > 0 && (
+              <details className="done-details">
+                <summary className="done-summary">
+                  {done.length} completed
+                </summary>
+                {done.map(s => <SubtaskItem key={s.id} sub={s} onToggle={handleToggle} />)}
+              </details>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Not yet generated */}
+      {!loading && subs.length === 0 && !generating && (
+        <p className="subtask-empty">
+          Hit <b>Break it down</b> and AI will create prioritised steps with resource links where needed.
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ── TaskItem ──────────────────────────────────────────────────────────────────
 function TaskItem({ t, onToggle, onDelete, onSaveNote, openId, setOpenId }) {
-  const open = openId === t.id
+  const open  = openId === t.id
   const [draft, setDraft] = useState(t.notes || '')
   const taRef = useRef(null)
 
@@ -23,22 +238,28 @@ function TaskItem({ t, onToggle, onDelete, onSaveNote, openId, setOpenId }) {
 
   useEffect(() => {
     if (open && taRef.current) {
-      taRef.current.focus()
       taRef.current.style.height = 'auto'
       taRef.current.style.height = taRef.current.scrollHeight + 'px'
     }
   }, [open])
 
-  const commit = () => {
-    if (draft !== t.notes) onSaveNote(t.id, draft)
+  const commit = () => { if (draft !== t.notes) onSaveNote(t.id, draft) }
+
+  const toggleOpen = (e) => {
+    e.stopPropagation()
+    setOpenId(open ? null : t.id)
   }
 
   return (
     <div className={`task ${t.done ? 'done' : ''} ${open ? 'note-open' : ''}`}>
+
+      {/* Checkbox */}
       <button className="check" aria-label="toggle done" onClick={() => onToggle(t.id)}>
         <IconCheck />
       </button>
-      <div className="body">
+
+      {/* Body — click to expand */}
+      <div className="body" onClick={toggleOpen} style={{ cursor: 'pointer' }}>
         <div className="title">{t.title}</div>
         <div className="row">
           <span className={`chip ${t.cat}`}>
@@ -59,21 +280,32 @@ function TaskItem({ t, onToggle, onDelete, onSaveNote, openId, setOpenId }) {
         </div>
         {t.notes && !open && <div className="note-preview">{t.notes}</div>}
       </div>
+
+      {/* Action buttons */}
       <div className="actions">
-        <button className="icon-btn" title={open ? 'close notes' : 'edit notes'} onClick={() => setOpenId(open ? null : t.id)}>
+        <button className="icon-btn" title={open ? 'close' : 'notes'} onClick={toggleOpen}>
           <IconPencil />
         </button>
         <button className="icon-btn danger" title="delete" onClick={() => onDelete(t.id)}>
           <IconTrash />
         </button>
       </div>
+
+      {/* Expanded area (full width, spans all columns) */}
       <div className="notes-wrap">
         <div className="notes-inner">
+
+          {/* AI Subtask panel */}
+          <SubtaskPanel task={t} visible={open} />
+
+          {/* Notes divider */}
+          <div className="notes-divider">Notes</div>
+
           <textarea
             ref={taRef}
             className="notes"
             value={draft}
-            placeholder="Add a note — context, links, sub-steps…"
+            placeholder="Add context, links, or additional notes…"
             onChange={(e) => {
               setDraft(e.target.value)
               e.target.style.height = 'auto'
@@ -84,6 +316,7 @@ function TaskItem({ t, onToggle, onDelete, onSaveNote, openId, setOpenId }) {
               if (e.key === 'Escape') setOpenId(null)
               if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { commit(); setOpenId(null) }
             }}
+            onClick={e => e.stopPropagation()}
           />
           <div className="notes-hint">esc to close · ⌘↵ to save</div>
         </div>
@@ -92,6 +325,7 @@ function TaskItem({ t, onToggle, onDelete, onSaveNote, openId, setOpenId }) {
   )
 }
 
+// ── TaskList ──────────────────────────────────────────────────────────────────
 export function TaskList({ tasks, onToggle, onDelete, onSaveNote }) {
   const [openId, setOpenId] = useState(null)
 
@@ -105,7 +339,7 @@ export function TaskList({ tasks, onToggle, onDelete, onSaveNote }) {
   }
 
   const pending = tasks.filter(t => !t.done)
-  const done    = tasks.filter(t => t.done)
+  const done    = tasks.filter(t =>  t.done)
 
   return (
     <div className="list">
@@ -115,7 +349,8 @@ export function TaskList({ tasks, onToggle, onDelete, onSaveNote }) {
             <span>To do</span><span className="rule" /><span>{pending.length}</span>
           </div>
           {pending.map(t => (
-            <TaskItem key={t.id} t={t} onToggle={onToggle} onDelete={onDelete} onSaveNote={onSaveNote} openId={openId} setOpenId={setOpenId} />
+            <TaskItem key={t.id} t={t} onToggle={onToggle} onDelete={onDelete}
+              onSaveNote={onSaveNote} openId={openId} setOpenId={setOpenId} />
           ))}
         </>
       )}
@@ -125,7 +360,8 @@ export function TaskList({ tasks, onToggle, onDelete, onSaveNote }) {
             <span>Done</span><span className="rule" /><span>{done.length}</span>
           </div>
           {done.map(t => (
-            <TaskItem key={t.id} t={t} onToggle={onToggle} onDelete={onDelete} onSaveNote={onSaveNote} openId={openId} setOpenId={setOpenId} />
+            <TaskItem key={t.id} t={t} onToggle={onToggle} onDelete={onDelete}
+              onSaveNote={onSaveNote} openId={openId} setOpenId={setOpenId} />
           ))}
         </>
       )}
@@ -133,10 +369,11 @@ export function TaskList({ tasks, onToggle, onDelete, onSaveNote }) {
   )
 }
 
+// ── Composer ──────────────────────────────────────────────────────────────────
 export function Composer({ onAdd, defaultCat }) {
-  const [text, setText]   = useState('')
-  const [cat,  setCat]    = useState(defaultCat || 'work')
-  const [prio, setPrio]   = useState('medium')
+  const [text, setText] = useState('')
+  const [cat,  setCat]  = useState(defaultCat || 'work')
+  const [prio, setPrio] = useState('medium')
 
   useEffect(() => { if (defaultCat) setCat(defaultCat) }, [defaultCat])
 
@@ -158,7 +395,7 @@ export function Composer({ onAdd, defaultCat }) {
           onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
         />
         <div className="seg" role="group" aria-label="category">
-          <button className={cat === 'work' ? 'on' : ''} onClick={() => setCat('work')}>WORK</button>
+          <button className={cat === 'work'     ? 'on' : ''} onClick={() => setCat('work')}>WORK</button>
           <button className={cat === 'personal' ? 'on' : ''} onClick={() => setCat('personal')}>PERSONAL</button>
         </div>
         <div className="seg" role="group" aria-label="priority">

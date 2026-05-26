@@ -9,7 +9,7 @@ const MOOD_BLURBS = [
   'On fire. Compound the streak.',
 ]
 
-export function computeMood({ tasks, history }) {
+export function computeMood({ tasks, history, subtasksByParent = {} }) {
   const W = { high: 3, medium: 2, low: 1 }
   let doneW = 0, pendW = 0, highPend = 0, recentDoneW = 0
   const now = Date.now()
@@ -24,14 +24,26 @@ export function computeMood({ tasks, history }) {
       pendW += w
       if (t.prio === 'high') highPend++
     }
+
+    // AI subtask weights contribute to avatar mood at 40% of a full task
+    const subs = subtasksByParent[t.id] ?? []
+    subs.forEach(s => {
+      const sw = (s.weight ?? 2) * 0.4
+      if (s.done) {
+        doneW += sw
+        if (s.completed && (now - s.completed) < 3 * DAY) recentDoneW += sw
+      } else if (!t.done) {
+        pendW += sw * 0.5  // half-weight for pending subtasks
+      }
+    })
   })
 
-  const ratio   = (doneW + recentDoneW * 0.6) / Math.max(1, doneW + pendW + recentDoneW * 0.6)
-  const last3   = history.daily.slice(-3).reduce((a, b) => a + b.count, 0) / 3
+  const ratio    = (doneW + recentDoneW * 0.6) / Math.max(1, doneW + pendW + recentDoneW * 0.6)
+  const last3    = history.daily.slice(-3).reduce((a, b) => a + b.count, 0) / 3
   const baseline = history.daily.reduce((a, b) => a + b.count, 0) / history.daily.length
-  const recent  = Math.max(-1, Math.min(1, (last3 - baseline) / (baseline + 1)))
-  const streak  = computeStreak(history.daily)
-  const streakF = Math.min(streak / 7, 1)
+  const recent   = Math.max(-1, Math.min(1, (last3 - baseline) / (baseline + 1)))
+  const streak   = computeStreak(history.daily)
+  const streakF  = Math.min(streak / 7, 1)
   const pressure = Math.min(highPend / 4, 1)
 
   let score = (ratio - 0.45) * 1.6 + recent * 0.45 + streakF * 0.4 - pressure * 0.85

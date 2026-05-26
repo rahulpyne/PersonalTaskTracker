@@ -423,3 +423,299 @@ input, textarea { font: inherit; color: inherit; background: transparent; border
   from { transform: translateX(0); }
   to   { transform: translateX(-50%); }
 }
+
+/* ── Notes section divider ─────────────────────────────────────────── */
+.notes-divider {
+  display: flex; align-items: center; gap: 10px; margin: 14px 0 6px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.notes-divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--line);
+}
+
+/* ── AI subtask panel ──────────────────────────────────────────────── */
+.subtask-panel {
+  margin-top: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.subtask-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.subtask-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.subtask-label b { color: var(--ink-2); font-weight: 600; }
+
+/* ── AI generate button ─────────────────────────────────────────────── */
+.ai-gen-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: var(--mono);
+  letter-spacing: .04em;
+  color: oklch(0.48 0.16 280);
+  background: oklch(0.94 0.04 280);
+  border: 1px solid oklch(0.84 0.08 280);
+  transition: background .18s ease, transform .15s ease, opacity .15s ease, box-shadow .18s ease;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ai-gen-btn:hover:not(:disabled) {
+  background: oklch(0.90 0.07 280);
+  box-shadow: 0 0 0 2px oklch(0.84 0.1 280 / .4);
+  transform: translateY(-1px);
+}
+.ai-gen-btn:disabled, .ai-gen-btn.generating {
+  opacity: .7;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Spinner inside button */
+.ai-spinner {
+  width: 10px; height: 10px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+  display: inline-block;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Progress bar ───────────────────────────────────────────────────── */
+.subtask-progress-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.subtask-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--good);
+  transition: width .5s cubic-bezier(.2,.7,.2,1);
+}
+
+/* ── Subtask list ───────────────────────────────────────────────────── */
+.subtask-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.subtask-item {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 8px;
+  align-items: start;
+  padding: 6px 4px;
+  border-radius: 8px;
+  transition: background .15s ease;
+  animation: rise .3s cubic-bezier(.2,.7,.2,1) both;
+}
+.subtask-item:hover { background: var(--bg-3); }
+.subtask-item.done { opacity: .55; }
+
+.subtask-check {
+  width: 18px; height: 18px;
+  border-radius: 5px;
+  border: 1.5px solid var(--line-2);
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+  transition: all .18s ease;
+  cursor: pointer;
+}
+.subtask-check:hover { border-color: var(--ink-2); }
+.subtask-item.done .subtask-check {
+  background: var(--good);
+  border-color: var(--good);
+}
+.subtask-item.done .subtask-check svg { opacity: 1; }
+.subtask-check svg { opacity: 0; color: white; transition: opacity .15s ease; }
+
+.subtask-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.subtask-title {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--ink);
+  text-decoration-line: none;
+}
+.subtask-item.done .subtask-title {
+  color: var(--ink-3);
+  text-decoration: line-through;
+}
+
+.subtask-note {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  line-height: 1.4;
+}
+
+/* ── Resource link chips ────────────────────────────────────────────── */
+.subtask-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-family: var(--mono);
+  color: oklch(0.42 0.12 235);
+  background: oklch(0.93 0.04 235);
+  border: 1px solid oklch(0.84 0.07 235);
+  text-decoration: none;
+  transition: background .15s ease, transform .12s ease;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.link-chip:hover {
+  background: oklch(0.88 0.07 235);
+  transform: translateY(-1px);
+}
+
+/* ── Subtask meta (priority badge + weight dots) ─────────────────────── */
+.subtask-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.subtask-prio {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.subtask-prio.prio-high { background: oklch(0.95 0.04 25); color: var(--bad); }
+.subtask-prio.prio-med  { background: oklch(0.96 0.04 60); color: var(--warn); }
+.subtask-prio.prio-low  { background: var(--bg-3); color: var(--ink-3); }
+
+/* ── Weight dots ────────────────────────────────────────────────────── */
+.weight-dots {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+.weight-dots .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  transition: background .25s ease;
+}
+
+/* ── Done-subtasks collapsible ──────────────────────────────────────── */
+.done-details { border-top: 1px solid var(--line); padding-top: 4px; margin-top: 4px; }
+.done-summary {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  cursor: pointer;
+  padding: 4px 0;
+  list-style: none;
+  user-select: none;
+}
+.done-summary::-webkit-details-marker { display: none; }
+.done-summary::before { content: '▶ '; font-size: 8px; }
+details[open] .done-summary::before { content: '▼ '; }
+
+/* ── Loading skeleton ───────────────────────────────────────────────── */
+.subtask-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skel-row {
+  display: grid;
+  grid-template-columns: 18px 1fr 28px;
+  gap: 8px;
+  align-items: center;
+}
+.skel-check {
+  width: 18px; height: 18px;
+  border-radius: 5px;
+  background: var(--line);
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+.skel-line {
+  height: 12px;
+  border-radius: 4px;
+  background: var(--line);
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+.skel-badge {
+  width: 28px; height: 16px;
+  border-radius: 4px;
+  background: var(--line);
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0%, 100% { opacity: .6; }
+  50%       { opacity: 1;  }
+}
+
+/* ── Empty state ────────────────────────────────────────────────────── */
+.subtask-empty {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  line-height: 1.55;
+  margin: 0;
+}
+.subtask-empty b { color: oklch(0.48 0.16 280); }
+
+/* ── Error ──────────────────────────────────────────────────────────── */
+.subtask-error {
+  font-size: 12px;
+  color: var(--bad);
+  font-family: var(--mono);
+  padding: 6px 10px;
+  background: oklch(0.96 0.02 25);
+  border-radius: 8px;
+  border: 1px solid oklch(0.88 0.06 25);
+}
