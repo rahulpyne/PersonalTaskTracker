@@ -61,6 +61,18 @@ async function refreshIfNeeded(config) {
   return config
 }
 
+// Mirror a freshly-refreshed token to the strava_tokens Supabase table
+// so the Vercel cron function always has a valid token from the last local run
+async function syncTokenToDB(supabase, config) {
+  const { error } = await supabase.from('strava_tokens').update({
+    access_token:  config.access_token,
+    refresh_token: config.refresh_token,
+    expires_at:    config.expires_at,
+    updated_at:    new Date().toISOString(),
+  }).eq('id', 'default')
+  if (error) warn('StravaFetcher: could not mirror token to DB — ' + error.message)
+}
+
 export async function run(supabase, { lookbackDays = 7 } = {}) {
   log('StravaFetcher: starting')
 
@@ -70,7 +82,10 @@ export async function run(supabase, { lookbackDays = 7 } = {}) {
   }
 
   let config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'))
+  const prevExpiry = config.expires_at
   config = await refreshIfNeeded(config)
+  // If token was refreshed, mirror it to Supabase so Vercel cron always has a valid token
+  if (config.expires_at !== prevExpiry) await syncTokenToDB(supabase, config)
 
   const after = Math.floor((Date.now() - lookbackDays * 86_400_000) / 1000)
   let page = 1, total = 0, synced = 0
