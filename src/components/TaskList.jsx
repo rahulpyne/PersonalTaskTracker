@@ -112,37 +112,33 @@ function SubtaskItem({ sub, onToggle }) {
 }
 
 // ── SubtaskPanel ──────────────────────────────────────────────────────────────
-function SubtaskPanel({ task, visible }) {
-  const [subs,       setSubs]       = useState([])
-  const [loading,    setLoading]    = useState(false)
-  const [generating, setGenerating] = useState(false)
-  const [error,      setError]      = useState(null)
-  const [loaded,     setLoaded]     = useState(false)
+// genSeed: bumped by TaskItem after each AI generation → triggers reload from DB
+// aiGenerating: true while TaskItem is calling the edge function
+// aiError: error string from TaskItem's generation attempt
+function SubtaskPanel({ task, visible, genSeed = 0, aiGenerating = false, aiError = null }) {
+  const [subs,    setSubs]    = useState([])
+  const [loading, setLoading] = useState(false)
+  const [loaded,  setLoaded]  = useState(false)
 
+  // Initial load when task first opens
   useEffect(() => {
     if (!visible || loaded) return
     setLoading(true)
     fetchSubtasks(task.id)
       .then(rows => { setSubs(rows.map(subtaskToUI)); setLoaded(true) })
-      .catch(e  => setError(e.message))
+      .catch(console.error)
       .finally(() => setLoading(false))
   }, [visible, loaded, task.id])
 
-  const handleGenerate = useCallback(async () => {
-    setGenerating(true)
-    setError(null)
-    try {
-      const rows = await generateSubtasks({
-        taskId: task.id, taskTitle: task.title,
-        taskCategory: task.cat, taskNotes: task.notes,
-      })
-      setSubs(rows.map(subtaskToUI))
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setGenerating(false)
-    }
-  }, [task])
+  // Reload from DB whenever a new generation completes (genSeed increments)
+  useEffect(() => {
+    if (genSeed === 0) return
+    setLoading(true)
+    fetchSubtasks(task.id)
+      .then(rows => setSubs(rows.map(subtaskToUI)))
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [genSeed, task.id])
 
   const handleToggle = useCallback(async (id, done) => {
     setSubs(prev => prev.map(s => s.id === id ? { ...s, done } : s))
@@ -155,35 +151,27 @@ function SubtaskPanel({ task, visible }) {
   const pending = subs.filter(s => !s.done)
   const done    = subs.filter(s =>  s.done)
   const pct     = subs.length ? Math.round((done.length / subs.length) * 100) : 0
+  const busy    = loading || aiGenerating
 
   return (
     <div className="subtask-panel">
 
-      {/* Header */}
+      {/* Header — label + inline spinner when busy */}
       <div className="subtask-header">
         <span className="subtask-label">
-          {subs.length > 0
-            ? <>{pending.length} step{pending.length !== 1 ? 's' : ''} left · <b>{pct}%</b> done</>
-            : 'AI sub-tasks'}
+          {aiGenerating
+            ? 'Generating steps…'
+            : subs.length > 0
+              ? <>{pending.length} step{pending.length !== 1 ? 's' : ''} left · <b>{pct}%</b> done</>
+              : 'AI sub-tasks'}
         </span>
-
-        <button
-          className={`ai-gen-btn ${generating ? 'generating' : ''}`}
-          onClick={handleGenerate}
-          disabled={generating}
-          title={subs.length > 0 ? 'Regenerate with AI' : 'Break into steps with AI'}
-        >
-          {generating
-            ? <><span className="ai-spinner" />Thinking…</>
-            : <><SparkleIcon />{subs.length > 0 ? 'Regenerate' : 'Break it down'}</>
-          }
-        </button>
+        {busy && <span className="ai-spinner" style={{ marginLeft: 'auto' }} />}
       </div>
 
-      {error && <div className="subtask-error">⚠ {error}</div>}
+      {aiError && <div className="subtask-error">⚠ {aiError}</div>}
 
-      {/* Skeleton while loading */}
-      {loading && (
+      {/* Shimmer skeleton while generating or initial-loading */}
+      {busy && subs.length === 0 && (
         <div className="subtask-skeleton">
           {[68, 82, 55].map((w, i) => (
             <div key={i} className="skel-row">
@@ -195,22 +183,17 @@ function SubtaskPanel({ task, visible }) {
         </div>
       )}
 
-      {/* List */}
-      {!loading && subs.length > 0 && (
+      {/* Subtask list */}
+      {!busy && subs.length > 0 && (
         <>
-          {/* Progress bar */}
           <div className="subtask-progress-track">
             <div className="subtask-progress-fill" style={{ width: `${pct}%` }} />
           </div>
-
           <div className="subtask-list">
             {pending.map(s => <SubtaskItem key={s.id} sub={s} onToggle={handleToggle} />)}
-
             {done.length > 0 && (
               <details className="done-details">
-                <summary className="done-summary">
-                  {done.length} completed
-                </summary>
+                <summary className="done-summary">{done.length} completed</summary>
                 {done.map(s => <SubtaskItem key={s.id} sub={s} onToggle={handleToggle} />)}
               </details>
             )}
@@ -218,10 +201,10 @@ function SubtaskPanel({ task, visible }) {
         </>
       )}
 
-      {/* Not yet generated */}
-      {!loading && subs.length === 0 && !generating && (
+      {/* Empty state */}
+      {!busy && subs.length === 0 && !aiError && (
         <p className="subtask-empty">
-          Hit <b>Break it down</b> and AI will create prioritised steps with resource links where needed.
+          Click the <b>✦</b> icon next to the task to generate AI-powered steps.
         </p>
       )}
     </div>
@@ -231,7 +214,10 @@ function SubtaskPanel({ task, visible }) {
 // ── TaskItem ──────────────────────────────────────────────────────────────────
 function TaskItem({ t, onToggle, onDelete, onSaveNote, openId, setOpenId }) {
   const open  = openId === t.id
-  const [draft, setDraft] = useState(t.notes || '')
+  const [draft,        setDraft]        = useState(t.notes || '')
+  const [aiGenerating, setAiGenerating] = useState(false)
+  const [aiError,      setAiError]      = useState(null)
+  const [genSeed,      setGenSeed]      = useState(0)   // increments to trigger SubtaskPanel reload
   const taRef = useRef(null)
 
   useEffect(() => { setDraft(t.notes || '') }, [t.id, t.notes])
@@ -249,6 +235,23 @@ function TaskItem({ t, onToggle, onDelete, onSaveNote, openId, setOpenId }) {
     e.stopPropagation()
     setOpenId(open ? null : t.id)
   }
+
+  // AI icon click: open the task + generate subtasks
+  const handleAIClick = useCallback(async (e) => {
+    e.stopPropagation()
+    if (aiGenerating) return
+    setOpenId(t.id)          // expand so the panel becomes visible
+    setAiGenerating(true)
+    setAiError(null)
+    try {
+      await generateSubtasks({ taskId: t.id, taskTitle: t.title, taskCategory: t.cat, taskNotes: t.notes })
+      setGenSeed(n => n + 1) // tell SubtaskPanel to re-fetch from DB
+    } catch (err) {
+      setAiError(err.message)
+    } finally {
+      setAiGenerating(false)
+    }
+  }, [t, aiGenerating, setOpenId])
 
   return (
     <div className={`task ${t.done ? 'done' : ''} ${open ? 'note-open' : ''}`}>
@@ -281,7 +284,7 @@ function TaskItem({ t, onToggle, onDelete, onSaveNote, openId, setOpenId }) {
         {t.notes && !open && <div className="note-preview">{t.notes}</div>}
       </div>
 
-      {/* Action buttons */}
+      {/* Action buttons — edit | delete | ✦ AI */}
       <div className="actions">
         <button className="icon-btn" title={open ? 'close' : 'notes'} onClick={toggleOpen}>
           <IconPencil />
@@ -289,16 +292,30 @@ function TaskItem({ t, onToggle, onDelete, onSaveNote, openId, setOpenId }) {
         <button className="icon-btn danger" title="delete" onClick={() => onDelete(t.id)}>
           <IconTrash />
         </button>
+        <button
+          className={`icon-btn ai-icon-btn${aiGenerating ? ' spinning' : ''}`}
+          title="Generate AI subtasks"
+          onClick={handleAIClick}
+          disabled={aiGenerating}
+        >
+          {aiGenerating
+            ? <span className="ai-btn-dot-spin" />
+            : <SparkleIcon />}
+        </button>
       </div>
 
-      {/* Expanded area (full width, spans all columns) */}
+      {/* Expanded area */}
       <div className="notes-wrap">
         <div className="notes-inner">
 
-          {/* AI Subtask panel */}
-          <SubtaskPanel task={t} visible={open} />
+          <SubtaskPanel
+            task={t}
+            visible={open}
+            genSeed={genSeed}
+            aiGenerating={aiGenerating}
+            aiError={aiError}
+          />
 
-          {/* Notes divider */}
           <div className="notes-divider">Notes</div>
 
           <textarea

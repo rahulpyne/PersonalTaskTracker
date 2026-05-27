@@ -226,6 +226,19 @@ input, textarea { font: inherit; color: inherit; background: transparent; border
 .icon-btn.danger:hover { color: var(--bad); }
 .icon-btn svg { width: 14px; height: 14px; }
 
+/* ✦ AI icon button */
+.ai-icon-btn { color: var(--ink-3); }
+.ai-icon-btn:hover { color: #a78bfa; background: rgba(167,139,250,.1); }
+.ai-icon-btn:disabled { opacity: .5; cursor: not-allowed; }
+.ai-icon-btn.spinning { color: #a78bfa; }
+/* tiny 3-dot pulsing spinner inside the icon button */
+.ai-btn-dot-spin {
+  display: inline-block; width: 14px; height: 14px;
+  border: 1.5px solid rgba(167,139,250,.3); border-top-color: #a78bfa;
+  border-radius: 50%; animation: ai-spin .7s linear infinite;
+}
+@keyframes ai-spin { to { transform: rotate(360deg); } }
+
 .notes-wrap { grid-column: 2 / 4; overflow: hidden; display: grid; grid-template-rows: 0fr; transition: grid-template-rows .28s ease; }
 .task.note-open .notes-wrap { grid-template-rows: 1fr; }
 .notes-inner { min-height: 0; }
