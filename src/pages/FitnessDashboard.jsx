@@ -2494,7 +2494,7 @@ function ExerciseCard({ name, hist, prRow, bodyweightLbs, animDelay = 0 }) {
 
   const hasWeight   = hist.some(h => h.top_weight_lbs)
   const bestW = prRow?.best_weight_lbs ?? (hasWeight ? Math.max(...hist.map(h => h.top_weight_lbs||0)) : null)
-  const bestR = prRow?.best_reps ?? hist.reduce((mx, h) => Math.max(mx, h.top_reps||0), 0) || null
+  const bestR = prRow?.best_reps ?? (hist.reduce((mx, h) => Math.max(mx, h.top_reps||0), 0) || null)
   const first = hist[0]
 
   const trendPct = hasWeight && hist.length > 1 && first.top_weight_lbs
