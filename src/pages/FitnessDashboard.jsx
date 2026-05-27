@@ -2643,6 +2643,26 @@ function ExerciseCard({ name, hist, prRow, bodyweightLbs, animDelay = 0 }) {
   )
 }
 
+// ── Muscle-group classifier ───────────────────────────────────────────────────
+const MUSCLE_GROUPS = ['Chest', 'Back', 'Legs', 'Biceps', 'Triceps', 'Core']
+
+function classifyMuscleGroup(name) {
+  const n = name.toLowerCase()
+  // 1. Triceps first — catches "overhead tricep extension" before OHP check
+  if (/tricep|skull.?crusher|pushdown|kick.?back|\bdips?\b/.test(n)) return 'Triceps'
+  // 2. Biceps
+  if (/\bcurl\b|bicep/.test(n)) return 'Biceps'
+  // 3. Legs
+  if (/squat|deadlift|leg.press|hip.thrust|calf.raise|lunge/.test(n)) return 'Legs'
+  // 4. Back (rows, pulldowns, pull-ups, cable pullover, OHP & shoulder movements, reverse fly)
+  if (/\brow\b|lat.pull|pull.?down|pull.?up|cable.pullover|pullover.bar|reverse.fly|lateral.raise|overhead.press|shoulder.press|military.press/.test(n)) return 'Back'
+  // 5. Chest (bench, fly, incline/decline press, dumbbell pullover)
+  if (/bench|chest|fly|flye|incline|decline|dumbbell.pullover|flat.pullover/.test(n)) return 'Chest'
+  // 6. Core
+  if (/crunch|plank|\bab\b|core|sit.?up/.test(n)) return 'Core'
+  return 'Other'
+}
+
 // ── Exercise progress grid (always-visible per-lift history) ─────────────────
 function ExerciseProgressGrid({ workouts, exercisePRs = {}, bodyweightLbs }) {
   const history = useMemo(() => {
@@ -2662,31 +2682,109 @@ function ExerciseProgressGrid({ workouts, exercisePRs = {}, bodyweightLbs }) {
     return h
   }, [workouts])
 
-  // Sort: weighted exercises first (sorted by sessions then weight),
-  // then reps-only exercises (sorted by sessions)
-  // No hard cap — show everything
-  const exercises = Object.entries(history).sort((a, b) => {
-    const aHasW = a[1].some(h => h.top_weight_lbs)
-    const bHasW = b[1].some(h => h.top_weight_lbs)
-    if (aHasW !== bHasW) return bHasW ? 1 : -1
+  // Sort within each group: weighted first → more sessions → heavier
+  const sortExercises = entries => entries.sort((a, b) => {
+    const aW = a[1].some(h => h.top_weight_lbs)
+    const bW = b[1].some(h => h.top_weight_lbs)
+    if (aW !== bW) return bW ? 1 : -1
     if (b[1].length !== a[1].length) return b[1].length - a[1].length
     return (b[1].at(-1)?.top_weight_lbs||0) - (a[1].at(-1)?.top_weight_lbs||0)
   })
 
-  if (!exercises.length) return null
+  // Group by muscle group
+  const grouped = {}
+  for (const [name, hist] of Object.entries(history)) {
+    const g = classifyMuscleGroup(name)
+    if (!grouped[g]) grouped[g] = []
+    grouped[g].push([name, hist])
+  }
+  for (const g of Object.keys(grouped)) sortExercises(grouped[g])
+
+  const activeGroups = [...MUSCLE_GROUPS, 'Other'].filter(g => grouped[g]?.length)
+  const [activeGroup, setActiveGroup] = useState(null)  // null = show all
+
+  if (!activeGroups.length) return null
+
+  // Determine which groups to render
+  const groupsToShow = activeGroup ? [activeGroup] : activeGroups
+
+  // Running card index for staggered animation across groups
+  let cardIdx = 0
 
   return (
-    <div style={{ display:'grid', gap:8, gridTemplateColumns:'repeat(auto-fill, minmax(200px,1fr))' }}>
-      {exercises.map(([name, hist], ci) => (
-        <ExerciseCard
-          key={name}
-          name={name}
-          hist={hist}
-          prRow={exercisePRs[name]}
-          bodyweightLbs={bodyweightLbs}
-          animDelay={ci * 0.04}
-        />
-      ))}
+    <div>
+      {/* ── Group filter pills ── */}
+      <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:20 }}>
+        <button
+          onClick={() => setActiveGroup(null)}
+          style={{
+            fontFamily:'var(--fd-mono)', fontSize:10, letterSpacing:'.1em',
+            textTransform:'uppercase', padding:'4px 10px', borderRadius:20,
+            border: `1px solid ${!activeGroup ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.12)'}`,
+            background: !activeGroup ? 'rgba(255,255,255,0.1)' : 'transparent',
+            color: !activeGroup ? 'var(--fd-ink1)' : 'var(--fd-ink3)',
+            cursor:'pointer', transition:'all .15s',
+          }}>
+          All · {Object.values(grouped).reduce((s, arr) => s + arr.length, 0)}
+        </button>
+        {activeGroups.map(g => (
+          <button key={g}
+            onClick={() => setActiveGroup(activeGroup === g ? null : g)}
+            style={{
+              fontFamily:'var(--fd-mono)', fontSize:10, letterSpacing:'.1em',
+              textTransform:'uppercase', padding:'4px 10px', borderRadius:20,
+              border: `1px solid ${activeGroup === g ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.12)'}`,
+              background: activeGroup === g ? 'rgba(255,255,255,0.1)' : 'transparent',
+              color: activeGroup === g ? 'var(--fd-ink1)' : 'var(--fd-ink3)',
+              cursor:'pointer', transition:'all .15s',
+            }}>
+            {g} · {grouped[g].length}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Grouped exercise cards ── */}
+      {groupsToShow.map(group => {
+        const entries = grouped[group] ?? []
+        if (!entries.length) return null
+        return (
+          <div key={group} style={{ marginBottom: 28 }}>
+            {/* Section header */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12,
+            }}>
+              <span style={{
+                fontFamily: 'var(--fd-mono)', fontSize: 9.5, letterSpacing: '.18em',
+                textTransform: 'uppercase', color: 'var(--fd-ink3)',
+              }}>
+                {group}
+              </span>
+              <span style={{
+                fontFamily: 'var(--fd-mono)', fontSize: 9, color: 'rgba(255,255,255,0.2)',
+              }}>
+                {entries.length} exercise{entries.length !== 1 ? 's' : ''}
+              </span>
+              <div style={{ flex:1, height:1, background:'rgba(255,255,255,0.06)' }} />
+            </div>
+            {/* Cards */}
+            <div style={{ display:'grid', gap:8, gridTemplateColumns:'repeat(auto-fill, minmax(200px,1fr))' }}>
+              {entries.map(([name, hist]) => {
+                const delay = (cardIdx++) * 0.03
+                return (
+                  <ExerciseCard
+                    key={name}
+                    name={name}
+                    hist={hist}
+                    prRow={exercisePRs[name]}
+                    bodyweightLbs={bodyweightLbs}
+                    animDelay={delay}
+                  />
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
