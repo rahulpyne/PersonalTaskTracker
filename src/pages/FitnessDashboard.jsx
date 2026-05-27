@@ -1518,11 +1518,14 @@ function FeedRow({act, idx, openId, setOpenId, allActs, gymWorkout}){
   const isPRPace  = prPaceRun?.id === act.id
   const isPRDist  = prDistRun?.id === act.id
 
-  // Strength: exercises with a top set, sorted heaviest first
+  // Strength: all named exercises (include bodyweight/reps-only), weighted first
   const exercises = useMemo(() =>
     (gymWorkout?.exercises || [])
-      .filter(e => e.name && e.top_set_weight_lbs)
-      .sort((a,b) => (b.top_set_weight_lbs||0) - (a.top_set_weight_lbs||0))
+      .filter(e => e.name && !e.name.toLowerCase().startsWith('unknown'))
+      .sort((a,b) => {
+        if (!!a.top_set_weight_lbs !== !!b.top_set_weight_lbs) return a.top_set_weight_lbs ? -1 : 1
+        return (b.top_set_weight_lbs||0) - (a.top_set_weight_lbs||0)
+      })
   , [gymWorkout])
 
   const hasGymData = isStrength && gymWorkout
@@ -1570,8 +1573,12 @@ function FeedRow({act, idx, openId, setOpenId, allActs, gymWorkout}){
         {isStrength ? (
           <>
             <div style={{fontFamily:'var(--fd-mono)',fontSize:13,color:'var(--fd-ink1)',textAlign:'right',minWidth:58}}>
-              <b style={{color:TC.strength}}>{exercises[0]?.top_set_weight_lbs ?? '—'}</b>
-              <small style={{fontFamily:'var(--fd-mono)',fontSize:10,color:'var(--fd-ink3)',display:'block',marginTop:2}}>{exercises[0] ? 'top lbs' : 'no data'}</small>
+              <b style={{color:TC.strength}}>
+                {exercises[0]?.top_set_weight_lbs ?? (exercises[0]?.top_set_reps ? `${exercises[0].top_set_reps}r` : '—')}
+              </b>
+              <small style={{fontFamily:'var(--fd-mono)',fontSize:10,color:'var(--fd-ink3)',display:'block',marginTop:2}}>
+                {exercises[0]?.top_set_weight_lbs ? 'top lbs' : exercises[0]?.top_set_reps ? 'best reps' : 'no data'}
+              </small>
             </div>
             <div style={{fontFamily:'var(--fd-mono)',fontSize:13,color:'var(--fd-ink1)',textAlign:'right',minWidth:44}}>
               <b>{act.duration_secs ? Math.round(act.duration_secs/60) : '—'}</b>
@@ -1649,9 +1656,13 @@ function FeedRow({act, idx, openId, setOpenId, allActs, gymWorkout}){
                             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
                             {ex.name}
                           </span>
-                          <span style={{fontFamily:'var(--fd-mono)', fontSize:11, color:TC.strength, flexShrink:0, fontWeight:600}}>
-                            {ex.top_set_weight_lbs} lbs
-                            {ex.top_set_reps ? <span style={{color:'var(--fd-ink3)', fontWeight:400}}> × {ex.top_set_reps}</span> : null}
+                          <span style={{fontFamily:'var(--fd-mono)', fontSize:11, color:ex.top_set_weight_lbs ? TC.strength : 'var(--fd-ink3)', flexShrink:0, fontWeight:600}}>
+                            {ex.top_set_weight_lbs
+                              ? <>{ex.top_set_weight_lbs} lbs{ex.top_set_reps ? <span style={{color:'var(--fd-ink3)', fontWeight:400}}> × {ex.top_set_reps}</span> : null}</>
+                              : ex.top_set_reps
+                                ? <span style={{fontWeight:400}}>bodyweight × {ex.top_set_reps}</span>
+                                : <span style={{color:'rgba(255,255,255,0.2)', fontWeight:400}}>tracked</span>
+                            }
                           </span>
                         </div>
                       ))}
@@ -2481,27 +2492,34 @@ function computeStrengthPercentile(exerciseName, weightLbs, bwLbs = 185) {
 function ExerciseCard({ name, hist, prRow, bodyweightLbs, animDelay = 0 }) {
   const [open, setOpen] = useState(false)
 
-  const bestW = prRow?.best_weight_lbs ?? hist.at(-1)?.top_weight_lbs
-  const bestR = prRow?.best_reps       ?? hist.at(-1)?.top_reps
+  const hasWeight   = hist.some(h => h.top_weight_lbs)
+  const bestW = prRow?.best_weight_lbs ?? (hasWeight ? Math.max(...hist.map(h => h.top_weight_lbs||0)) : null)
+  const bestR = prRow?.best_reps ?? hist.reduce((mx, h) => Math.max(mx, h.top_reps||0), 0) || null
   const first = hist[0]
-  const trendPct = hist.length > 1 && first.top_weight_lbs
+
+  const trendPct = hasWeight && hist.length > 1 && first.top_weight_lbs
     ? Math.round(((hist.at(-1).top_weight_lbs - first.top_weight_lbs) / first.top_weight_lbs) * 100)
     : null
 
-  const pctInfo  = bestW ? computeStrengthPercentile(name, bestW, bodyweightLbs || 185) : null
-  const pct      = pctInfo?.percentile ?? null
+  const pctInfo = bestW ? computeStrengthPercentile(name, bestW, bodyweightLbs || 185) : null
+  const pct     = pctInfo?.percentile ?? null
 
-  // Percentile bar color: ramps from muted → ORANGE as pct grows
   const barColor = !pct ? 'rgba(255,255,255,0.2)'
     : pct >= 96 ? ORANGE
     : pct >= 91 ? 'var(--good)'
     : pct >= 82 ? 'var(--warn)'
     : 'rgba(255,255,255,0.3)'
 
+  // Chart: prefer weight axis; fall back to reps for bodyweight exercises
   const points = hist.map(h => ({
     label:      h.date,
     shortLabel: h.date?.slice(5),
-    value:      h.top_weight_lbs,
+    value:      h.top_weight_lbs ?? 0,
+  }))
+  const repsPoints = hist.map(h => ({
+    label:      h.date,
+    shortLabel: h.date?.slice(5),
+    value:      h.top_reps ?? 0,
   }))
   const prIdx = points.reduce((bi,p,i) => p.value > (points[bi]?.value||0) ? i : bi, 0)
 
@@ -2512,17 +2530,15 @@ function ExerciseCard({ name, hist, prRow, bodyweightLbs, animDelay = 0 }) {
       style={{
         background: open ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.025)',
         border: `1px solid ${open ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.07)'}`,
-        borderRadius: 14,
-        overflow: 'hidden',
-        transition: 'background 0.2s, border-color 0.2s',
-        cursor: 'pointer',
+        borderRadius: 14, overflow: 'hidden',
+        transition: 'background 0.2s, border-color 0.2s', cursor: 'pointer',
       }}
       onClick={() => setOpen(v => !v)}>
 
-      {/* ── Collapsed body — always visible ── */}
+      {/* ── Collapsed body ── */}
       <div style={{ padding:'14px 16px' }}>
 
-        {/* Row 1: name + expand chevron */}
+        {/* Row 1: name + chevron */}
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:6, marginBottom:10 }}>
           <div style={{
             fontSize:11.5, color:'var(--fd-ink2)', lineHeight:1.35, flex:1, minWidth:0,
@@ -2535,20 +2551,36 @@ function ExerciseCard({ name, hist, prRow, bodyweightLbs, animDelay = 0 }) {
           </span>
         </div>
 
-        {/* Row 2: big PR weight × reps */}
-        <div style={{ display:'flex', alignItems:'baseline', gap:6, marginBottom:10 }}>
-          <span style={{ fontFamily:'var(--fd-serif)', fontSize:36, color:ORANGE, letterSpacing:'-0.03em', lineHeight:1 }}>
-            {bestW ?? '—'}
-          </span>
-          {bestR && (
-            <span style={{ fontFamily:'var(--fd-mono)', fontSize:13, color:'var(--fd-ink2)' }}>
-              × {bestR}
+        {/* Row 2: big PR stat */}
+        {hasWeight ? (
+          <div style={{ display:'flex', alignItems:'baseline', gap:6, marginBottom:10 }}>
+            <span style={{ fontFamily:'var(--fd-serif)', fontSize:36, color:ORANGE, letterSpacing:'-0.03em', lineHeight:1 }}>
+              {bestW}
             </span>
-          )}
-          <span style={{ fontFamily:'var(--fd-mono)', fontSize:10, color:'var(--fd-ink3)', marginLeft:2 }}>lbs · PR</span>
-        </div>
+            {bestR > 0 && (
+              <span style={{ fontFamily:'var(--fd-mono)', fontSize:13, color:'var(--fd-ink2)' }}>× {bestR}</span>
+            )}
+            <span style={{ fontFamily:'var(--fd-mono)', fontSize:10, color:'var(--fd-ink3)', marginLeft:2 }}>lbs · PR</span>
+          </div>
+        ) : (
+          /* Reps-only / bodyweight exercise */
+          <div style={{ display:'flex', alignItems:'baseline', gap:6, marginBottom:10 }}>
+            {bestR > 0 ? (
+              <>
+                <span style={{ fontFamily:'var(--fd-serif)', fontSize:36, color:'var(--fd-ink2)', letterSpacing:'-0.03em', lineHeight:1 }}>
+                  {bestR}
+                </span>
+                <span style={{ fontFamily:'var(--fd-mono)', fontSize:10, color:'var(--fd-ink3)', marginLeft:2 }}>reps · best</span>
+              </>
+            ) : (
+              <span style={{ fontFamily:'var(--fd-mono)', fontSize:11, color:'rgba(255,255,255,0.25)', lineHeight:1.6 }}>
+                {hist.length} session{hist.length !== 1 ? 's' : ''} tracked
+              </span>
+            )}
+          </div>
+        )}
 
-        {/* Row 3: population percentile bar */}
+        {/* Row 3: percentile bar (weighted) or session/trend info (bodyweight) */}
         {pct !== null ? (
           <div>
             <div style={{ height:4, borderRadius:2, background:'rgba(255,255,255,0.08)', overflow:'hidden', marginBottom:5 }}>
@@ -2565,31 +2597,27 @@ function ExerciseCard({ name, hist, prRow, bodyweightLbs, animDelay = 0 }) {
             </div>
           </div>
         ) : (
-          <div style={{ fontFamily:'var(--fd-mono)', fontSize:9, color:'rgba(255,255,255,0.2)' }}>
-            {hist.length} session{hist.length !== 1 ? 's' : ''}
+          <div style={{ fontFamily:'var(--fd-mono)', fontSize:9, color:'rgba(255,255,255,0.2)', display:'flex', gap:8, alignItems:'center' }}>
+            <span>{hist.length} session{hist.length !== 1 ? 's' : ''}</span>
             {trendPct !== null && (
-              <span style={{ color: trendPct >= 0 ? 'var(--good)' : 'var(--bad)', marginLeft:6 }}>
+              <span style={{ color: trendPct >= 0 ? 'var(--good)' : 'var(--bad)' }}>
                 {trendPct >= 0 ? '+' : ''}{trendPct}%
               </span>
             )}
+            {!hasWeight && <span style={{ marginLeft:'auto', color:'rgba(255,255,255,0.15)' }}>bodyweight</span>}
           </div>
         )}
       </div>
 
-      {/* ── Expanded section: timeline chart ── */}
+      {/* ── Expanded: timeline chart ── */}
       <AnimatePresence initial={false}>
         {open && (
-          <motion.div
-            key="chart"
-            initial={{ height:0, opacity:0 }}
-            animate={{ height:'auto', opacity:1 }}
+          <motion.div key="chart"
+            initial={{ height:0, opacity:0 }} animate={{ height:'auto', opacity:1 }}
             exit={{ height:0, opacity:0 }}
             transition={{ duration:0.3, ease:[0.2,0.7,0.2,1] }}
             style={{ overflow:'hidden' }}>
-            <div style={{
-              borderTop: '1px solid rgba(255,255,255,0.07)',
-              padding: '12px 16px 14px',
-            }}>
+            <div style={{ borderTop:'1px solid rgba(255,255,255,0.07)', padding:'12px 16px 14px' }}>
               <div style={{ fontFamily:'var(--fd-mono)', fontSize:9, color:'var(--fd-ink3)', letterSpacing:'.12em', textTransform:'uppercase', marginBottom:8 }}>
                 Progress — {hist.length} session{hist.length !== 1 ? 's' : ''}
                 {trendPct !== null && (
@@ -2598,7 +2626,13 @@ function ExerciseCard({ name, hist, prRow, bodyweightLbs, animDelay = 0 }) {
                   </span>
                 )}
               </div>
-              <ExerciseLineChart points={points} color={TC.strength} prIdx={prIdx}/>
+              {hasWeight
+                ? <ExerciseLineChart points={points} color={TC.strength} prIdx={prIdx} yFmt={v=>`${v}lb`}/>
+                : (bestR > 0
+                    ? <ExerciseLineChart points={repsPoints} color='var(--fd-ink2)' prIdx={-1} yFmt={v=>`${v}r`} floor={0} prLabel="best"/>
+                    : <div style={{fontFamily:'var(--fd-mono)',fontSize:10,color:'rgba(255,255,255,0.2)',textAlign:'center',padding:'16px 0'}}>No rep data captured from photos</div>
+                  )
+              }
             </div>
           </motion.div>
         )}
@@ -2613,22 +2647,29 @@ function ExerciseProgressGrid({ workouts, exercisePRs = {}, bodyweightLbs }) {
     const h = {}
     for (const w of [...workouts].sort((a,b) => (a.workout_date||a.started_at) < (b.workout_date||b.started_at) ? -1 : 1)) {
       for (const ex of (w.exercises||[])) {
-        if (!ex.name || !ex.top_set_weight_lbs) continue
+        // Include every exercise that has a real name (even if weight is unknown)
+        if (!ex.name || ex.name.toLowerCase().startsWith('unknown')) continue
         if (!h[ex.name]) h[ex.name] = []
         h[ex.name].push({
           date:           w.workout_date || w.started_at?.slice(0,10),
-          top_weight_lbs: ex.top_set_weight_lbs,
-          top_reps:       ex.top_set_reps,
+          top_weight_lbs: ex.top_set_weight_lbs || null,
+          top_reps:       ex.top_set_reps || null,
         })
       }
     }
     return h
   }, [workouts])
 
-  // Sort: most sessions first, then heaviest; cap at 12
-  const exercises = Object.entries(history)
-    .sort((a,b) => b[1].length - a[1].length || (b[1].at(-1)?.top_weight_lbs||0) - (a[1].at(-1)?.top_weight_lbs||0))
-    .slice(0, 12)
+  // Sort: weighted exercises first (sorted by sessions then weight),
+  // then reps-only exercises (sorted by sessions)
+  // No hard cap — show everything
+  const exercises = Object.entries(history).sort((a, b) => {
+    const aHasW = a[1].some(h => h.top_weight_lbs)
+    const bHasW = b[1].some(h => h.top_weight_lbs)
+    if (aHasW !== bHasW) return bHasW ? 1 : -1
+    if (b[1].length !== a[1].length) return b[1].length - a[1].length
+    return (b[1].at(-1)?.top_weight_lbs||0) - (a[1].at(-1)?.top_weight_lbs||0)
+  })
 
   if (!exercises.length) return null
 
