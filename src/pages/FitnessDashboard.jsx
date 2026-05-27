@@ -35,7 +35,9 @@ const LEVEL_COLORS  = [
 
 // Map exercise name substrings → canonical lift key
 const CANONICAL_LIFT_MAP = [
-  { key:'bench',    terms:['bench press','chest press','barbell bench','flat bench','incline bench press'] },
+  { key:'bench',    terms:['bench press','chest press','barbell bench','flat bench',
+                            'incline bench press','incline barbell','barbell incline',
+                            'decline bench','decline barbell','decline press'] },
   { key:'squat',    terms:['barbell squat','back squat','front squat',' squat'] },
   { key:'deadlift', terms:['deadlift','sumo dead','romanian dead','rdl'] },
   { key:'ohp',      terms:['overhead press','military press','shoulder press','smith machine overhead','ohp','arnold press','dumbbell overhead','seated overhead'] },

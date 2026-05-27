@@ -168,6 +168,15 @@ Return ONLY a valid JSON object — no markdown fences, no extra text.
   "image_description": "string"      // brief description (≤ 20 words)
 }
 
+━━ Exercise naming conventions ━━
+Use these exact canonical names where applicable:
+• Flat barbell bench press → "Barbell Bench Press"
+• Incline barbell press / barbell incline press → "Barbell Incline Press"
+• Decline barbell press / barbell decline press → "Decline Barbell Bench Press"
+• Incline dumbbell press → "Incline Dumbbell Press"
+• Plate-loaded incline machine → "Plate Loaded Incline Chest Press Machine"
+When in doubt about flat vs incline vs decline, look at bench angle in the image.
+
 ━━ Rules ━━
 1. If no workout data is visible (pure selfie, no equipment/whiteboard), return exercises: []
 2. Never invent exercises not evidenced in the image
@@ -338,7 +347,9 @@ function buildRow(act, exercises, totalVolumeLbs, bestConfidence, imageDescripti
 
 // ── Canonical lift key (mirrors dashboard logic) ─────────────────────────────
 const CANONICAL_MAP = [
-  { key:'bench',    terms:['bench press','chest press','barbell bench','flat bench','incline bench press'] },
+  { key:'bench',    terms:['bench press','chest press','barbell bench','flat bench',
+                            'incline bench press','incline barbell','barbell incline',
+                            'decline bench','decline barbell','decline press'] },
   { key:'squat',    terms:['barbell squat','back squat','front squat',' squat'] },
   { key:'deadlift', terms:['deadlift','sumo dead','romanian dead','rdl'] },
   { key:'ohp',      terms:['overhead press','military press','shoulder press','smith machine overhead','ohp','arnold press','dumbbell overhead','seated overhead'] },
