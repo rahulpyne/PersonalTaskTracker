@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { IconCheck, IconPencil, IconTrash, IconPlus } from './Icons'
-import { fetchSubtasks, toggleSubtask, generateSubtasks } from '../lib/tasks'
-import { subtaskToUI } from '../lib/adapter'
+import { toggleSubtask, generateSubtasks } from '../lib/tasks'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -112,36 +111,18 @@ function SubtaskItem({ sub, onToggle }) {
 }
 
 // ── SubtaskPanel ──────────────────────────────────────────────────────────────
-// genSeed: bumped by TaskItem after each AI generation → triggers reload from DB
-// aiGenerating: true while TaskItem is calling the edge function
-// aiError: error string from TaskItem's generation attempt
-function SubtaskPanel({ task, visible, genSeed = 0, aiGenerating = false, aiError = null }) {
-  const [subs,    setSubs]    = useState([])
-  const [loading, setLoading] = useState(false)
-  const [loaded,  setLoaded]  = useState(false)
+// Subtasks arrive pre-loaded on task.subtasks (embedded in fetchTasks query).
+// No separate DB call — just reads from props and handles optimistic toggles.
+function SubtaskPanel({ task, visible, aiGenerating = false, aiError = null }) {
+  // Local copy for optimistic toggle updates; syncs when task.subtasks changes
+  const [subs, setSubs] = useState(task.subtasks || [])
 
-  // Reset loaded when panel closes so next open always gets fresh DB data
   useEffect(() => {
-    if (!visible) { setLoaded(false); return }
-    if (loaded) return
-    setLoading(true)
-    fetchSubtasks(task.id)
-      .then(rows => { setSubs(rows.map(subtaskToUI)); setLoaded(true) })
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [visible, loaded, task.id])
-
-  // Reload from DB whenever a new generation completes (genSeed increments)
-  useEffect(() => {
-    if (genSeed === 0) return
-    setLoading(true)
-    fetchSubtasks(task.id)
-      .then(rows => setSubs(rows.map(subtaskToUI)))
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [genSeed, task.id])
+    setSubs(task.subtasks || [])
+  }, [task.subtasks])
 
   const handleToggle = useCallback(async (id, done) => {
+    // Optimistic update
     setSubs(prev => prev.map(s => s.id === id ? { ...s, done } : s))
     try { await toggleSubtask(id, done) }
     catch { setSubs(prev => prev.map(s => s.id === id ? { ...s, done: !done } : s)) }
@@ -152,12 +133,11 @@ function SubtaskPanel({ task, visible, genSeed = 0, aiGenerating = false, aiErro
   const pending = subs.filter(s => !s.done)
   const done    = subs.filter(s =>  s.done)
   const pct     = subs.length ? Math.round((done.length / subs.length) * 100) : 0
-  const busy    = loading || aiGenerating
 
   return (
     <div className="subtask-panel">
 
-      {/* Header — label + inline spinner when busy */}
+      {/* Header */}
       <div className="subtask-header">
         <span className="subtask-label">
           {aiGenerating
@@ -166,13 +146,13 @@ function SubtaskPanel({ task, visible, genSeed = 0, aiGenerating = false, aiErro
               ? <>{pending.length} step{pending.length !== 1 ? 's' : ''} left · <b>{pct}%</b> done</>
               : 'AI sub-tasks'}
         </span>
-        {busy && <span className="ai-spinner" style={{ marginLeft: 'auto' }} />}
+        {aiGenerating && <span className="ai-spinner" style={{ marginLeft: 'auto' }} />}
       </div>
 
       {aiError && <div className="subtask-error">⚠ {aiError}</div>}
 
-      {/* Shimmer skeleton while generating or initial-loading */}
-      {busy && subs.length === 0 && (
+      {/* Skeleton while AI is generating and no subtasks yet */}
+      {aiGenerating && subs.length === 0 && (
         <div className="subtask-skeleton">
           {[68, 82, 55].map((w, i) => (
             <div key={i} className="skel-row">
@@ -185,7 +165,7 @@ function SubtaskPanel({ task, visible, genSeed = 0, aiGenerating = false, aiErro
       )}
 
       {/* Subtask list */}
-      {!busy && subs.length > 0 && (
+      {!aiGenerating && subs.length > 0 && (
         <>
           <div className="subtask-progress-track">
             <div className="subtask-progress-fill" style={{ width: `${pct}%` }} />
@@ -203,7 +183,7 @@ function SubtaskPanel({ task, visible, genSeed = 0, aiGenerating = false, aiErro
       )}
 
       {/* Empty state */}
-      {!busy && subs.length === 0 && !aiError && (
+      {!aiGenerating && subs.length === 0 && !aiError && (
         <p className="subtask-empty">
           Click the <b>✦</b> icon next to the task to generate AI-powered steps.
         </p>
@@ -213,12 +193,11 @@ function SubtaskPanel({ task, visible, genSeed = 0, aiGenerating = false, aiErro
 }
 
 // ── TaskItem ──────────────────────────────────────────────────────────────────
-function TaskItem({ t, onToggle, onDelete, onSaveNote, openId, setOpenId }) {
+function TaskItem({ t, onToggle, onDelete, onSaveNote, onRefresh, openId, setOpenId }) {
   const open  = openId === t.id
   const [draft,        setDraft]        = useState(t.notes || '')
   const [aiGenerating, setAiGenerating] = useState(false)
   const [aiError,      setAiError]      = useState(null)
-  const [genSeed,      setGenSeed]      = useState(0)   // increments to trigger SubtaskPanel reload
   const taRef = useRef(null)
 
   useEffect(() => { setDraft(t.notes || '') }, [t.id, t.notes])
@@ -237,22 +216,22 @@ function TaskItem({ t, onToggle, onDelete, onSaveNote, openId, setOpenId }) {
     setOpenId(open ? null : t.id)
   }
 
-  // AI icon click: open the task + generate subtasks
+  // AI icon click: expand task + generate subtasks
   const handleAIClick = useCallback(async (e) => {
     e.stopPropagation()
     if (aiGenerating) return
-    setOpenId(t.id)          // expand so the panel becomes visible
+    setOpenId(t.id)
     setAiGenerating(true)
     setAiError(null)
     try {
       await generateSubtasks({ taskId: t.id, taskTitle: t.title, taskCategory: t.cat, taskNotes: t.notes })
-      setGenSeed(n => n + 1) // tell SubtaskPanel to re-fetch from DB
+      onRefresh()   // re-fetch tasks so new subtasks arrive via task.subtasks
     } catch (err) {
       setAiError(err.message)
     } finally {
       setAiGenerating(false)
     }
-  }, [t, aiGenerating, setOpenId])
+  }, [t, aiGenerating, setOpenId, onRefresh])
 
   return (
     <div className={`task ${t.done ? 'done' : ''} ${open ? 'note-open' : ''}`}>
@@ -312,7 +291,6 @@ function TaskItem({ t, onToggle, onDelete, onSaveNote, openId, setOpenId }) {
           <SubtaskPanel
             task={t}
             visible={open}
-            genSeed={genSeed}
             aiGenerating={aiGenerating}
             aiError={aiError}
           />
@@ -344,7 +322,7 @@ function TaskItem({ t, onToggle, onDelete, onSaveNote, openId, setOpenId }) {
 }
 
 // ── TaskList ──────────────────────────────────────────────────────────────────
-export function TaskList({ tasks, onToggle, onDelete, onSaveNote }) {
+export function TaskList({ tasks, onToggle, onDelete, onSaveNote, onRefresh }) {
   const [openId, setOpenId] = useState(null)
 
   if (!tasks.length) {
@@ -368,7 +346,7 @@ export function TaskList({ tasks, onToggle, onDelete, onSaveNote }) {
           </div>
           {pending.map(t => (
             <TaskItem key={t.id} t={t} onToggle={onToggle} onDelete={onDelete}
-              onSaveNote={onSaveNote} openId={openId} setOpenId={setOpenId} />
+              onSaveNote={onSaveNote} onRefresh={onRefresh} openId={openId} setOpenId={setOpenId} />
           ))}
         </>
       )}
@@ -379,7 +357,7 @@ export function TaskList({ tasks, onToggle, onDelete, onSaveNote }) {
           </div>
           {done.map(t => (
             <TaskItem key={t.id} t={t} onToggle={onToggle} onDelete={onDelete}
-              onSaveNote={onSaveNote} openId={openId} setOpenId={setOpenId} />
+              onSaveNote={onSaveNote} onRefresh={onRefresh} openId={openId} setOpenId={setOpenId} />
           ))}
         </>
       )}

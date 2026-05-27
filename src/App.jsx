@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import Sidebar, { Brand } from './components/Sidebar'
 import { TaskList, Composer } from './components/TaskList'
 import Insights from './components/Insights'
@@ -104,6 +104,11 @@ export default function App() {
     }
   }
 
+  // Used by TaskItem after AI generation to pull fresh embedded subtasks
+  const onRefresh = useCallback(() => {
+    fetchTasks().then(setDbTasks).catch(console.error)
+  }, [])
+
   const onClearCompleted = async () => {
     const prev = dbTasks
     setDbTasks(ts => ts.filter(t => !t.completed))
@@ -208,7 +213,7 @@ export default function App() {
             </div>
 
             <div className="scroll">
-              <TaskList tasks={visible} onToggle={onToggle} onDelete={onDelete} onSaveNote={onSaveNote} />
+              <TaskList tasks={visible} onToggle={onToggle} onDelete={onDelete} onSaveNote={onSaveNote} onRefresh={onRefresh} />
               <Composer onAdd={onAdd} defaultCat={cat === 'personal' ? 'personal' : 'work'} />
             </div>
           </>

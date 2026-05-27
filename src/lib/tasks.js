@@ -1,11 +1,11 @@
 import { supabase } from './supabase'
 
-// ── Top-level tasks (no parent) ───────────────────────────────────────────────
+// ── Top-level tasks — subtasks embedded in one query ─────────────────────────
 
 export async function fetchTasks() {
   const { data, error } = await supabase
     .from('tasks')
-    .select('*')
+    .select('*, subtasks:tasks!parent_id(*)')
     .is('parent_id', null)
     .order('created_at', { ascending: false })
   if (error) throw error
@@ -16,7 +16,7 @@ export async function createTask(fields) {
   const { data, error } = await supabase
     .from('tasks')
     .insert([fields])
-    .select()
+    .select('*, subtasks:tasks!parent_id(*)')
     .single()
   if (error) throw error
   return data
@@ -27,7 +27,7 @@ export async function updateTask(id, fields) {
     .from('tasks')
     .update(fields)
     .eq('id', id)
-    .select()
+    .select('*, subtasks:tasks!parent_id(*)')
     .single()
   if (error) throw error
   return data
@@ -48,17 +48,7 @@ export async function clearCompleted() {
   if (error) throw error
 }
 
-// ── Subtasks ──────────────────────────────────────────────────────────────────
-
-export async function fetchSubtasks(parentId) {
-  const { data, error } = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('parent_id', parentId)
-    .order('position', { ascending: true })
-  if (error) throw error
-  return data ?? []
-}
+// ── Subtask toggle (still a direct row update) ────────────────────────────────
 
 export async function toggleSubtask(id, done) {
   const { data, error } = await supabase
