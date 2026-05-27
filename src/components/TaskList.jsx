@@ -120,9 +120,10 @@ function SubtaskPanel({ task, visible, genSeed = 0, aiGenerating = false, aiErro
   const [loading, setLoading] = useState(false)
   const [loaded,  setLoaded]  = useState(false)
 
-  // Initial load when task first opens
+  // Reset loaded when panel closes so next open always gets fresh DB data
   useEffect(() => {
-    if (!visible || loaded) return
+    if (!visible) { setLoaded(false); return }
+    if (loaded) return
     setLoading(true)
     fetchSubtasks(task.id)
       .then(rows => { setSubs(rows.map(subtaskToUI)); setLoaded(true) })
