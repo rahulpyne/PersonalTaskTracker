@@ -1,4 +1,4 @@
-import { IconList, IconBars, CatIcon, Flame } from './Icons'
+import { IconList, IconBars, CatIcon, Flame, IconNote } from './Icons'
 import { computeStreak } from '../lib/history'
 
 function Logo({ size = 38 }) {
@@ -37,7 +37,7 @@ function Brand({ showValues = true }) {
   )
 }
 
-export default function Sidebar({ view, setView, cat, setCat, tasks, history }) {
+export default function Sidebar({ view, setView, cat, setCat, tasks, history, noteCount = 0 }) {
   const streak = computeStreak(history.daily)
   const counts = {
     all:      tasks.length,
@@ -61,6 +61,10 @@ export default function Sidebar({ view, setView, cat, setCat, tasks, history }) 
         </button>
         <button className={`side-item ${view === 'fitness' ? 'active' : ''}`} onClick={() => setView('fitness')}>
           ⚡ Fitness
+        </button>
+        <button className={`side-item ${view === 'notes' ? 'active' : ''}`} onClick={() => setView('notes')}>
+          <IconNote size={15} /> Notes
+          {noteCount > 0 && <span className="count">{noteCount}</span>}
         </button>
       </div>
 

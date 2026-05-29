@@ -5,16 +5,19 @@ import Insights from './components/Insights'
 import { ReactiveAvatar } from './components/Avatar'
 import { IconList, IconBars, CatIcon } from './components/Icons'
 import FitnessDashboard from './pages/FitnessDashboard'
+import Notes from './pages/Notes'
 import { toUI, toDB, toDBToggle } from './lib/adapter'
 import { buildHistory } from './lib/history'
 import { fetchTasks, createTask, updateTask, deleteTask, clearCompleted, subscribeToTasks } from './lib/tasks'
+import { fetchNotes } from './lib/notes'
 
 const TODAY_LABEL = new Date().toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric' })
 
 export default function App() {
-  const [dbTasks, setDbTasks] = useState([])
-  const [loading, setLoading]  = useState(true)
-  const [error,   setError]    = useState(null)
+  const [dbTasks,    setDbTasks]    = useState([])
+  const [noteCount,  setNoteCount]  = useState(0)
+  const [loading,    setLoading]    = useState(true)
+  const [error,      setError]      = useState(null)
 
   const [view,   setView]   = useState(() => localStorage.getItem('tracker:view')   || 'tasks')
   const [cat,    setCat]    = useState(() => localStorage.getItem('tracker:cat')    || 'all')
@@ -25,8 +28,11 @@ export default function App() {
 
   // ── Load + realtime ────────────────────────────────────────────
   useEffect(() => {
-    fetchTasks()
-      .then(rows => setDbTasks(rows))
+    Promise.all([fetchTasks(), fetchNotes()])
+      .then(([taskRows, noteRows]) => {
+        setDbTasks(taskRows)
+        setNoteCount(noteRows.length)
+      })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [])
@@ -140,7 +146,7 @@ export default function App() {
   return (
     <div className="app">
       {/* Desktop sidebar */}
-      <Sidebar view={view} setView={setView} cat={cat} setCat={setCat} tasks={tasks} history={history} />
+      <Sidebar view={view} setView={setView} cat={cat} setCat={setCat} tasks={tasks} history={history} noteCount={noteCount} />
 
       {/* Mobile header */}
       <header className="mhead">
@@ -236,6 +242,10 @@ export default function App() {
               <Insights tasks={tasks} history={history} />
             </div>
           </>
+        ) : view === 'notes' ? (
+          <div className="scroll notes-scroll" style={{ overflow: 'auto', padding: 0 }}>
+            <Notes />
+          </div>
         ) : (
           <div className="scroll" style={{ overflow: 'auto' }}>
             <FitnessDashboard />
@@ -253,6 +263,9 @@ export default function App() {
         </button>
         <button className={view === 'fitness' ? 'active' : ''} onClick={() => setView('fitness')}>
           ⚡ Fitness
+        </button>
+        <button className={view === 'notes' ? 'active' : ''} onClick={() => setView('notes')}>
+          📝 Notes
         </button>
       </nav>
     </div>

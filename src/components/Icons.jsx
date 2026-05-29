@@ -16,6 +16,7 @@ export const IconBars     = (p) => <Icon {...p}><path d="M4 20V10M10 20V4M16 20v
 export const IconBriefcase = (p) => <Icon {...p}><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 12h18" /></Icon>
 export const IconHeart    = (p) => <Icon {...p}><path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z" /></Icon>
 export const IconFlame    = (p) => <Icon {...p}><path d="M12 3c1 4 5 5 5 9a5 5 0 1 1-10 0c0-2 1-3 2-4-.5 2 .5 3 2 3 0-3-1-5 1-8z" /></Icon>
+export const IconNote     = (p) => <Icon {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></Icon>
 
 export function CatIcon({ cat, size = 14 }) {
   if (cat === 'work')     return <span className="gicon work"><IconBriefcase size={size} /></span>
