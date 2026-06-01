@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { fetchNotes, createNote, updateNote, deleteNote } from '../lib/notes'
+import { fetchNotes, createNote, updateNote, deleteNote, structureNote } from '../lib/notes'
+import { startRecording, stopRecording, transcribeAudio, isVoiceSupported } from '../lib/voice'
 
 // ── Tiny markdown renderer (no extra deps) ────────────────────────────────────
 function renderMarkdown(md) {
@@ -81,8 +82,28 @@ function NoteListItem({ note, active, onClick }) {
   )
 }
 
+// ── MicIcon ───────────────────────────────────────────────────────────────────
+function MicIcon({ active }) {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none"
+         stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="2" width="6" height="11" rx="3" fill={active ? 'currentColor' : 'none'} />
+      <path d="M19 10a7 7 0 0 1-14 0M12 19v3M8 22h8" />
+    </svg>
+  )
+}
+
+// ── StopIcon ──────────────────────────────────────────────────────────────────
+function StopIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+    </svg>
+  )
+}
+
 // ── Main Notes page ───────────────────────────────────────────────────────────
-export default function Notes() {
+export default function Notes({ focusNoteId, onFocusClear }) {
   const [notes,     setNotes]     = useState([])
   const [loading,   setLoading]   = useState(true)
   const [activeId,  setActiveId]  = useState(null)
@@ -92,6 +113,19 @@ export default function Notes() {
   const [tagInput,  setTagInput]  = useState('')
   const saveTimer = useRef(null)
   const bodyRef   = useRef(null)
+
+  // AI structuring state
+  const [aiWorking,  setAiWorking]  = useState(false)
+  const [aiError,    setAiError]    = useState(null)
+
+  // Voice recording state (Whisper-based)
+  const [voiceOpen,      setVoiceOpen]      = useState(false)
+  const [recording,      setRecording]      = useState(false)
+  const [transcribing,   setTranscribing]   = useState(false)
+  const [transcript,     setTranscript]     = useState('')
+  const [elapsed,        setElapsed]        = useState(0)
+  const voiceSupported = isVoiceSupported()
+  const timerRef = useRef(null)
 
   // Draft fields (controlled editor)
   const [draftTitle, setDraftTitle] = useState('')
@@ -109,6 +143,13 @@ export default function Notes() {
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [])
+
+  // ── Jump to note when navigating from Graph view ───────────────────────────
+  useEffect(() => {
+    if (!focusNoteId) return
+    setActiveId(focusNoteId)
+    onFocusClear?.()
+  }, [focusNoteId]) // eslint-disable-line
 
   // ── Sync draft when active note changes ───────────────────────────────────
   const active = notes.find(n => n.id === activeId) ?? null
@@ -179,6 +220,110 @@ export default function Notes() {
     } catch (e) { console.error(e) }
     finally { setSaving(false) }
   }
+
+  // ── AI: structure existing note body ─────────────────────────────────────
+  const handleStructure = useCallback(async () => {
+    const text = draftBody.trim() || draftTitle.trim()
+    if (!text || aiWorking) return
+    setAiWorking(true)
+    setAiError(null)
+    try {
+      const result = await structureNote({ text, mode: 'structure' })
+      // Apply AI output to the current draft + trigger save
+      if (result.title) setDraftTitle(result.title)
+      setDraftBody(result.body ?? '')
+      const newTags = [...new Set([...draftTags, ...(result.tags ?? [])])]
+      setDraftTags(newTags)
+      clearTimeout(saveTimer.current)
+      setSaving(true)
+      const updated = await updateNote(activeId, {
+        title: result.title || draftTitle,
+        body:  result.body  || draftBody,
+        tags:  newTags,
+        pinned: draftPinned,
+      })
+      setNotes(prev => prev.map(n => n.id === activeId ? { ...n, ...updated } : n))
+      // Resize textarea
+      if (bodyRef.current) {
+        bodyRef.current.style.height = 'auto'
+        bodyRef.current.style.height = bodyRef.current.scrollHeight + 'px'
+      }
+    } catch (e) {
+      setAiError(e.message)
+    } finally {
+      setAiWorking(false)
+      setSaving(false)
+    }
+  }, [draftBody, draftTitle, draftTags, draftPinned, activeId, aiWorking]) // eslint-disable-line
+
+  // ── Voice: Whisper-based recording ───────────────────────────────────────
+  const fmtElapsed = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+
+  const handleVoiceStart = useCallback(async () => {
+    setAiError(null)
+    try {
+      await startRecording()
+      setRecording(true)
+      setElapsed(0)
+      timerRef.current = setInterval(() => setElapsed(s => s + 1), 1000)
+    } catch (e) {
+      setAiError(
+        e.name === 'NotAllowedError'
+          ? 'Microphone access denied — allow it in your browser settings'
+          : e.message
+      )
+    }
+  }, [])
+
+  const handleVoiceStop = useCallback(async () => {
+    clearInterval(timerRef.current)
+    setRecording(false)
+    setTranscribing(true)
+    setAiError(null)
+    try {
+      const blob = await stopRecording()
+      if (!blob || blob.size < 1000) { setTranscribing(false); return }
+      const text = await transcribeAudio(blob, 'personal notes ideas tasks')
+      if (text) setTranscript(prev => prev ? prev + ' ' + text : text)
+    } catch (e) {
+      setAiError(e.message)
+    } finally {
+      setTranscribing(false)
+      setElapsed(0)
+    }
+  }, [])
+
+  // ── Voice: create note from transcript ───────────────────────────────────
+  const handleVoiceCreate = useCallback(async () => {
+    const text = transcript.trim()
+    if (!text || aiWorking) return
+    setAiWorking(true)
+    setAiError(null)
+    try {
+      const result = await structureNote({ text, mode: 'voice' })
+      const note   = await createNote({
+        title: result.title || 'Voice Note',
+        body:  result.body  || text,
+        tags:  result.tags  || [],
+      })
+      setNotes(prev => [note, ...prev])
+      setActiveId(note.id)
+      setVoiceOpen(false)
+      setTranscript('')
+    } catch (e) {
+      setAiError(e.message)
+    } finally {
+      setAiWorking(false)
+    }
+  }, [transcript, aiWorking]) // eslint-disable-line
+
+  const closeVoicePanel = useCallback(() => {
+    if (recording) handleVoiceStop()
+    setVoiceOpen(false)
+  }, [recording, handleVoiceStop])
+
+  // Cleanup timer on unmount
+  useEffect(() => () => clearInterval(timerRef.current), [])
 
   // ── New note ──────────────────────────────────────────────────────────────
   const handleNew = async () => {
@@ -277,11 +422,31 @@ export default function Notes() {
 
       {/* ── Right panel: editor ── */}
       <main className="notes-editor-panel">
+
+        {/* AI / mic error — always rendered so voice errors show on empty state too */}
+        {aiError && (
+          <div className="notes-ai-error">
+            <span>⚠ {aiError}</span>
+            <button onClick={() => setAiError(null)}>×</button>
+          </div>
+        )}
+
         {!active ? (
           <div className="notes-empty-state">
             <div className="notes-empty-icon">📝</div>
             <div className="notes-empty-msg">Select a note or create a new one</div>
-            <button className="notes-new-btn" onClick={handleNew}>New note (⌘N)</button>
+            <div className="notes-empty-actions">
+              <button className="notes-new-btn" onClick={handleNew}>New note (⌘N)</button>
+              {voiceSupported && (
+                <button
+                  className={`notes-new-btn notes-voice-cta ${recording ? 'recording' : ''}`}
+                  onClick={() => setVoiceOpen(v => !v)}
+                >
+                  <MicIcon active={recording} />
+                  {recording ? <><span className="voice-rec-dot" /> Recording…</> : 'Voice note'}
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <>
@@ -301,6 +466,27 @@ export default function Notes() {
                   title="Toggle preview (⌘P)"
                 >
                   {preview ? '✏️ Edit' : '👁 Preview'}
+                </button>
+                <div className="notes-toolbar-sep" />
+                {voiceSupported && (
+                  <button
+                    className={`notes-tool-btn notes-voice-btn ${voiceOpen ? 'active' : ''}`}
+                    onClick={() => voiceOpen ? closeVoicePanel() : setVoiceOpen(true)}
+                    title="Voice input"
+                  >
+                    <MicIcon active={recording} />
+                    {recording && <span className="voice-rec-dot" />}
+                    Voice
+                  </button>
+                )}
+                <button
+                  className="notes-tool-btn notes-ai-btn"
+                  onClick={handleStructure}
+                  disabled={aiWorking || !draftBody.trim()}
+                  title="AI-structure this note"
+                >
+                  {aiWorking ? <span className="notes-ai-spin">⟳</span> : '✦'}
+                  Structure
                 </button>
               </div>
               <div className="notes-toolbar-right">
@@ -359,11 +545,81 @@ export default function Notes() {
               />
             )}
 
+            {/* AI working overlay on note body */}
+            {aiWorking && !voiceOpen && (
+              <div className="notes-ai-overlay">
+                <span className="notes-ai-spin-lg">⟳</span>
+                <span>Structuring note…</span>
+              </div>
+            )}
+
             <div className="notes-hint">
               Auto-saves · ⌘N new · ⌘P preview · Markdown supported
             </div>
           </>
         )}
+
+        {/* ── Voice panel — lives outside active-note gate so it works from empty state ── */}
+        {voiceOpen && (
+          <div className="notes-voice-panel">
+            <div className="voice-panel-header">
+              <span className="voice-panel-title">
+                <MicIcon active={recording} />
+                {recording ? <><span className="voice-rec-dot" />Recording…</> : 'Voice Input'}
+              </span>
+              <button className="voice-panel-close" onClick={closeVoicePanel} title="Close">×</button>
+            </div>
+
+            <div className="voice-transcript-area">
+              {!transcript && !transcribing && !recording && (
+                <span className="voice-transcript-empty">
+                  Hit Record and start talking — pause anytime, hit Stop when done
+                </span>
+              )}
+              {!transcript && recording && (
+                <span className="voice-transcript-empty">Listening… speak now</span>
+              )}
+              {transcribing && (
+                <span className="voice-transcript-empty">
+                  <span className="notes-ai-spin">⟳</span> Transcribing…
+                </span>
+              )}
+              {transcript && <span className="voice-transcript-text">{transcript}</span>}
+            </div>
+
+            <div className="voice-panel-actions">
+              {!recording && !transcribing ? (
+                <button className="voice-btn voice-btn-record" onClick={handleVoiceStart} disabled={transcribing}>
+                  <MicIcon active={false} /> Record
+                </button>
+              ) : recording ? (
+                <button className="voice-btn voice-btn-stop" onClick={handleVoiceStop}>
+                  <StopIcon /> Stop · <span className="voice-elapsed">{fmtElapsed(elapsed)}</span>
+                </button>
+              ) : null}
+              {transcript.trim() && !recording && (
+                <button
+                  className="voice-btn voice-btn-create"
+                  onClick={handleVoiceCreate}
+                  disabled={aiWorking}
+                >
+                  {aiWorking
+                    ? <><span className="notes-ai-spin">⟳</span> Structuring…</>
+                    : <>✦ Structure &amp; Create Note</>}
+                </button>
+              )}
+              {transcript.trim() && (
+                <button
+                  className="voice-btn voice-btn-ghost"
+                  onClick={() => { setTranscript(''); transcriptRef.current = '' }}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
       </main>
     </div>
   )

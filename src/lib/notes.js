@@ -36,6 +36,29 @@ export async function deleteNote(id) {
   if (error) throw error
 }
 
+// ── AI note structuring ───────────────────────────────────────────────────────
+export async function structureNote({ text, mode = 'structure' }) {
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+  const url     = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-notes`
+
+  const resp = await fetch(url, {
+    method:  'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${anonKey}`,
+      'apikey':        anonKey,
+    },
+    body: JSON.stringify({ text, mode }),
+  })
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}))
+    throw new Error(err.error ?? `HTTP ${resp.status}`)
+  }
+
+  return resp.json()  // { title, body, tags }
+}
+
 export function subscribeToNotes(onChange) {
   const channel = supabase
     .channel('notes-rt')

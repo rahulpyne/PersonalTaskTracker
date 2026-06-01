@@ -18,7 +18,14 @@ const SUPABASE_URL         = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const GEMINI_API_KEY       = Deno.env.get('GEMINI_API_KEY')!
 
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`
+// Model cascade: lite → full flash (fallback if lite overloaded)
+const GEMINI_MODELS = [
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-1.5-flash',
+]
+const geminiUrl = (model: string) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface SubtaskSpec {
@@ -50,43 +57,73 @@ Deno.serve(async (req: Request) => {
   const { taskId, taskTitle, taskCategory, taskNotes } = body
   if (!taskId || !taskTitle) return new Response('taskId and taskTitle required', { status: 400 })
 
-  // ── Call Gemini ────────────────────────────────────────────────────────────
+  // ── Call Gemini — cascade through models until one succeeds ───────────────
   const prompt = buildPrompt(taskTitle, taskCategory ?? 'work', taskNotes ?? '')
 
-  let subtaskSpecs: SubtaskSpec[]
-  try {
-    const gemResp = await fetch(GEMINI_URL, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          temperature: 0.4,
-          maxOutputTokens: 2048,
-        },
-      }),
-    })
-    const gemJson = await gemResp.json()
-    if (!gemResp.ok) throw new Error(gemJson?.error?.message ?? 'Gemini API error')
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-    const raw = gemJson?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
-    if (!raw) throw new Error('empty Gemini response')
+  async function callGemini(model: string): Promise<SubtaskSpec[]> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await sleep(1500)  // brief back-off on retry
 
-    // Repair truncated JSON: find last complete object and close the array
-    let repaired = raw.trim()
-    if (!repaired.endsWith(']')) {
-      const lastBrace = repaired.lastIndexOf('}')
-      if (lastBrace !== -1) repaired = repaired.slice(0, lastBrace + 1) + ']'
-      else repaired = '[]'
+      const gemResp = await fetch(geminiUrl(model), {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.4,
+            maxOutputTokens: 2048,
+          },
+        }),
+      })
+      const gemJson = await gemResp.json()
+
+      // Retry-able: model overloaded or rate-limited
+      if (!gemResp.ok) {
+        const msg: string = gemJson?.error?.message ?? ''
+        const retryable = /high demand|overload|rate|quota|503|529/i.test(msg)
+        if (retryable && attempt === 0) continue   // try same model once more
+        throw new Error(msg || `HTTP ${gemResp.status}`)
+      }
+
+      const raw: string = gemJson?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+      if (!raw) throw new Error('empty Gemini response')
+
+      // Repair truncated JSON: find last complete object and close the array
+      let repaired = raw.trim()
+      if (!repaired.endsWith(']')) {
+        const lastBrace = repaired.lastIndexOf('}')
+        repaired = lastBrace !== -1 ? repaired.slice(0, lastBrace + 1) + ']' : '[]'
+      }
+      const parsed = JSON.parse(repaired)
+      const specs = Array.isArray(parsed) ? parsed : parsed.subtasks
+      if (!Array.isArray(specs)) throw new Error('unexpected Gemini response shape')
+      return specs
     }
+    throw new Error('Gemini retries exhausted')
+  }
 
-    const parsed = JSON.parse(repaired)
-    subtaskSpecs = Array.isArray(parsed) ? parsed : parsed.subtasks
-    if (!Array.isArray(subtaskSpecs)) throw new Error('unexpected Gemini response shape')
-  } catch (e) {
-    console.error('Gemini error:', e)
-    return new Response(JSON.stringify({ error: `AI error: ${(e as Error).message}` }), {
+  let subtaskSpecs: SubtaskSpec[] = []
+  let lastError = ''
+  let succeeded = false
+  for (const model of GEMINI_MODELS) {
+    try {
+      subtaskSpecs = await callGemini(model)
+      console.log(`ai-subtasks: used model ${model}`)
+      succeeded = true
+      break
+    } catch (e) {
+      lastError = (e as Error).message
+      const fatal = !/high demand|overload|rate|quota|503|529|not found|404/i.test(lastError)
+      console.warn(`ai-subtasks: model ${model} failed — ${lastError}${fatal ? ' (fatal)' : ' (trying next)'}`)
+      if (fatal) break   // don't try other models on non-retryable errors
+    }
+  }
+
+  if (!succeeded) {
+    return new Response(JSON.stringify({ error: `AI error: ${lastError}` }), {
       status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     })
   }

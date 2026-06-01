@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { IconCheck, IconPencil, IconTrash, IconPlus } from './Icons'
 import { toggleSubtask, generateSubtasks } from '../lib/tasks'
+import { startRecording, stopRecording, transcribeAudio, isVoiceSupported } from '../lib/voice'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -367,9 +368,15 @@ export function TaskList({ tasks, onToggle, onDelete, onSaveNote, onRefresh }) {
 
 // ── Composer ──────────────────────────────────────────────────────────────────
 export function Composer({ onAdd, defaultCat }) {
-  const [text, setText] = useState('')
-  const [cat,  setCat]  = useState(defaultCat || 'work')
-  const [prio, setPrio] = useState('medium')
+  const [text,       setText]       = useState('')
+  const [cat,        setCat]        = useState(defaultCat || 'work')
+  const [prio,       setPrio]       = useState('medium')
+  const [voiceState, setVoiceState] = useState('idle')   // idle | recording | transcribing
+  const [elapsed,    setElapsed]    = useState(0)
+  const [voiceErr,   setVoiceErr]   = useState(null)
+  const timerRef  = useRef(null)
+  const inputRef  = useRef(null)
+  const canVoice  = isVoiceSupported()
 
   useEffect(() => { if (defaultCat) setCat(defaultCat) }, [defaultCat])
 
@@ -378,17 +385,99 @@ export function Composer({ onAdd, defaultCat }) {
     if (!v) return
     onAdd({ title: v, cat, prio })
     setText('')
+    inputRef.current?.focus()
   }
+
+  // ── Voice handlers ──────────────────────────────────────────────────────────
+  const handleMicClick = useCallback(async () => {
+    setVoiceErr(null)
+
+    if (voiceState === 'recording') {
+      // Stop → transcribe
+      clearInterval(timerRef.current)
+      setVoiceState('transcribing')
+      try {
+        const blob = await stopRecording()
+        if (!blob || blob.size < 1000) {
+          setVoiceState('idle')
+          setElapsed(0)
+          return
+        }
+        const transcript = await transcribeAudio(blob, 'task tracker personal tasks')
+        if (transcript) {
+          setText(transcript)
+          inputRef.current?.focus()
+        }
+      } catch (e) {
+        setVoiceErr(e.message)
+      }
+      setVoiceState('idle')
+      setElapsed(0)
+      return
+    }
+
+    // Start recording
+    try {
+      await startRecording()
+      setVoiceState('recording')
+      setElapsed(0)
+      timerRef.current = setInterval(() => setElapsed(s => s + 1), 1000)
+    } catch (e) {
+      setVoiceErr(
+        e.name === 'NotAllowedError'
+          ? 'Mic access denied — allow it in your browser settings'
+          : e.message
+      )
+      setVoiceState('idle')
+    }
+  }, [voiceState])
+
+  // Cleanup timer on unmount
+  useEffect(() => () => clearInterval(timerRef.current), [])
+
+  const fmtElapsed = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
   return (
     <div className="composer-wrap">
+      {voiceErr && (
+        <div className="composer-voice-err">
+          ⚠ {voiceErr}
+          <button onClick={() => setVoiceErr(null)}>×</button>
+        </div>
+      )}
       <div className="composer">
+        {/* Mic button */}
+        {canVoice && (
+          <button
+            className={`composer-mic-btn ${voiceState === 'recording' ? 'recording' : ''} ${voiceState === 'transcribing' ? 'transcribing' : ''}`}
+            onClick={handleMicClick}
+            disabled={voiceState === 'transcribing'}
+            title={voiceState === 'recording' ? `Stop recording (${fmtElapsed(elapsed)})` : 'Voice input (Whisper)'}
+          >
+            {voiceState === 'transcribing' ? (
+              <span className="composer-mic-spin">⟳</span>
+            ) : voiceState === 'recording' ? (
+              <>
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                <span className="composer-mic-timer">{fmtElapsed(elapsed)}</span>
+              </>
+            ) : (
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="9" y="2" width="6" height="11" rx="3"/>
+                <path d="M19 10a7 7 0 0 1-14 0M12 19v3M8 22h8"/>
+              </svg>
+            )}
+          </button>
+        )}
+
         <input
+          ref={inputRef}
           className="title-input"
-          placeholder="Add a task — type, pick category & priority, ↵"
+          placeholder={voiceState === 'recording' ? `Listening… ${fmtElapsed(elapsed)}` : 'Add a task — or tap 🎤 to speak'}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+          readOnly={voiceState === 'recording'}
         />
         <div className="seg" role="group" aria-label="category">
           <button className={cat === 'work'     ? 'on' : ''} onClick={() => setCat('work')}>WORK</button>
@@ -399,7 +488,7 @@ export function Composer({ onAdd, defaultCat }) {
           <button className={prio === 'medium' ? 'on' : ''} onClick={() => setPrio('medium')}>M</button>
           <button className={prio === 'low'    ? 'on' : ''} onClick={() => setPrio('low')}>L</button>
         </div>
-        <button className="add-btn" disabled={!text.trim()} onClick={submit}>
+        <button className="add-btn" disabled={!text.trim() || voiceState !== 'idle'} onClick={submit}>
           <IconPlus size={14} /> Add
         </button>
       </div>

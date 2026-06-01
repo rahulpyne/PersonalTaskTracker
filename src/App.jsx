@@ -6,6 +6,7 @@ import { ReactiveAvatar } from './components/Avatar'
 import { IconList, IconBars, CatIcon } from './components/Icons'
 import FitnessDashboard from './pages/FitnessDashboard'
 import Notes from './pages/Notes'
+import Graph from './pages/Graph'
 import { toUI, toDB, toDBToggle } from './lib/adapter'
 import { buildHistory } from './lib/history'
 import { fetchTasks, createTask, updateTask, deleteTask, clearCompleted, subscribeToTasks } from './lib/tasks'
@@ -19,9 +20,10 @@ export default function App() {
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState(null)
 
-  const [view,   setView]   = useState(() => localStorage.getItem('tracker:view')   || 'tasks')
-  const [cat,    setCat]    = useState(() => localStorage.getItem('tracker:cat')    || 'all')
-  const [filter, setFilter] = useState('all')
+  const [view,           setView]           = useState(() => localStorage.getItem('tracker:view') || 'tasks')
+  const [cat,            setCat]            = useState(() => localStorage.getItem('tracker:cat')  || 'all')
+  const [filter,         setFilter]         = useState('all')
+  const [graphFocusId,   setGraphFocusId]   = useState(null)
 
   useEffect(() => { localStorage.setItem('tracker:view', view) }, [view])
   useEffect(() => { localStorage.setItem('tracker:cat',  cat)  }, [cat])
@@ -146,7 +148,7 @@ export default function App() {
   return (
     <div className="app">
       {/* Desktop sidebar */}
-      <Sidebar view={view} setView={setView} cat={cat} setCat={setCat} tasks={tasks} history={history} noteCount={noteCount} />
+      <Sidebar view={view} setView={setView} cat={cat} setCat={setCat} tasks={tasks} history={history} noteCount={noteCount} graphFocusId={graphFocusId} />
 
       {/* Mobile header */}
       <header className="mhead">
@@ -220,8 +222,8 @@ export default function App() {
 
             <div className="scroll">
               <TaskList tasks={visible} onToggle={onToggle} onDelete={onDelete} onSaveNote={onSaveNote} onRefresh={onRefresh} />
-              <Composer onAdd={onAdd} defaultCat={cat === 'personal' ? 'personal' : 'work'} />
             </div>
+            <Composer onAdd={onAdd} defaultCat={cat === 'personal' ? 'personal' : 'work'} />
           </>
         ) : view === 'insights' ? (
           <>
@@ -244,7 +246,11 @@ export default function App() {
           </>
         ) : view === 'notes' ? (
           <div className="scroll notes-scroll" style={{ overflow: 'auto', padding: 0 }}>
-            <Notes />
+            <Notes focusNoteId={graphFocusId} onFocusClear={() => setGraphFocusId(null)} />
+          </div>
+        ) : view === 'graph' ? (
+          <div className="scroll graph-scroll" style={{ overflow: 'hidden', padding: 0 }}>
+            <Graph onNoteClick={(id) => { setGraphFocusId(id); setView('notes') }} />
           </div>
         ) : (
           <div className="scroll" style={{ overflow: 'auto' }}>
@@ -266,6 +272,9 @@ export default function App() {
         </button>
         <button className={view === 'notes' ? 'active' : ''} onClick={() => setView('notes')}>
           📝 Notes
+        </button>
+        <button className={view === 'graph' ? 'active' : ''} onClick={() => setView('graph')}>
+          ✦ Graph
         </button>
       </nav>
     </div>

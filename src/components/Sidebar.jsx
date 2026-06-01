@@ -1,4 +1,4 @@
-import { IconList, IconBars, CatIcon, Flame, IconNote } from './Icons'
+import { IconList, IconBars, CatIcon, Flame, IconNote, IconGraph } from './Icons'
 import { computeStreak } from '../lib/history'
 
 function Logo({ size = 38 }) {
@@ -65,6 +65,9 @@ export default function Sidebar({ view, setView, cat, setCat, tasks, history, no
         <button className={`side-item ${view === 'notes' ? 'active' : ''}`} onClick={() => setView('notes')}>
           <IconNote size={15} /> Notes
           {noteCount > 0 && <span className="count">{noteCount}</span>}
+        </button>
+        <button className={`side-item ${view === 'graph' ? 'active' : ''}`} onClick={() => setView('graph')}>
+          <IconGraph size={15} /> Graph
         </button>
       </div>
 
