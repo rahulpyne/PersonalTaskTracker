@@ -47,6 +47,15 @@ const server = new McpServer({
 
 // ── TASK TOOLS ─────────────────────────────────────────────────────────────────
 
+// DB columns: text=title, type=category, prio=priority (high/med/low), context=notes
+const PRIO_TO_DB = { high: 'high', medium: 'med', low: 'low' }
+const PRIO_TO_UI = { high: 'high', med: 'medium', low: 'low' }
+function taskToUI(t) {
+  return { id: t.id, title: t.text, category: t.type,
+           priority: PRIO_TO_UI[t.prio] ?? t.prio,
+           done: t.done, done_at: t.done_at, created_at: t.created_at, notes: t.context }
+}
+
 server.tool(
   'list_tasks',
   'List tasks. Filter by category (work | personal | all) and status (todo | done | all).',
@@ -57,17 +66,17 @@ server.tool(
   async ({ category, status }) => {
     let q = supabase
       .from('tasks')
-      .select('id, title, category, priority, done, done_at, created_at, context')
+      .select('id, text, type, prio, done, done_at, created_at, context')
       .is('parent_id', null)
       .order('created_at', { ascending: false })
 
-    if (category !== 'all') q = q.eq('category', category)
+    if (category !== 'all') q = q.eq('type', category)
     if (status   === 'todo') q = q.eq('done', false)
     if (status   === 'done') q = q.eq('done', true)
 
     const { data, error } = await q
     if (error) return err(error.message)
-    return ok({ count: data.length, tasks: data })
+    return ok({ count: data.length, tasks: (data ?? []).map(taskToUI) })
   }
 )
 
@@ -83,18 +92,12 @@ server.tool(
   async ({ title, category, priority, notes }) => {
     const { data, error } = await supabase
       .from('tasks')
-      .insert([{
-        title,
-        category,
-        priority,
-        context: notes ?? '',
-        done: false,
-      }])
-      .select('id, title, category, priority, done, created_at')
+      .insert([{ text: title, type: category, prio: PRIO_TO_DB[priority] ?? 'med', context: notes ?? '', done: false }])
+      .select('id, text, type, prio, done, created_at, context')
       .single()
 
     if (error) return err(error.message)
-    return ok({ message: 'Task created', task: data })
+    return ok({ message: 'Task created', task: taskToUI(data) })
   }
 )
 
@@ -110,11 +113,11 @@ server.tool(
       .from('tasks')
       .update({ done, done_at: done ? new Date().toISOString() : null })
       .eq('id', id)
-      .select('id, title, done')
+      .select('id, text, done')
       .single()
 
     if (error) return err(error.message)
-    return ok({ message: `Task marked ${done ? 'done' : 'todo'}`, task: data })
+    return ok({ message: `Task marked ${done ? 'done' : 'todo'}`, task: { id: data.id, title: data.text, done: data.done } })
   }
 )
 
@@ -130,20 +133,20 @@ server.tool(
   },
   async ({ id, title, category, priority, notes }) => {
     const fields = {}
-    if (title    !== undefined) fields.title    = title
-    if (category !== undefined) fields.category = category
-    if (priority !== undefined) fields.priority = priority
-    if (notes    !== undefined) fields.context  = notes
+    if (title    !== undefined) fields.text    = title
+    if (category !== undefined) fields.type    = category
+    if (priority !== undefined) fields.prio    = PRIO_TO_DB[priority] ?? priority
+    if (notes    !== undefined) fields.context = notes
 
     const { data, error } = await supabase
       .from('tasks')
       .update(fields)
       .eq('id', id)
-      .select('id, title, category, priority, done')
+      .select('id, text, type, prio, done, context')
       .single()
 
     if (error) return err(error.message)
-    return ok({ message: 'Task updated', task: data })
+    return ok({ message: 'Task updated', task: taskToUI(data) })
   }
 )
 
