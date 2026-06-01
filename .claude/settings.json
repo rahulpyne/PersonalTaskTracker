@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "personal-task-tracker": {
+      "command": "node",
+      "args": ["mcp-server/index.js"],
+      "cwd": "/Users/rahulpyne/repo/PersonalTaskTracker"
+    }
+  }
+}

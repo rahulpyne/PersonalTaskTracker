@@ -1,0 +1,17 @@
+{
+  "name": "personal-task-tracker-mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "bin": { "tracker-mcp": "index.js" },
+  "scripts": {
+    "start":      "node index.js",
+    "start:http": "node index.js --http"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@supabase/supabase-js": "^2.106.2",
+    "dotenv": "^17.4.2",
+    "zod": "^4.4.3"
+  }
+}
