@@ -100,7 +100,7 @@ Deno.serve(async (req: Request) => {
 
   // ── OpenAPI spec ────────────────────────────────────────────────────────────
   if (rawPath === '/openapi.json' && method === 'GET') {
-    const base = `${url.protocol}//${url.host}/functions/v1/api`
+    const base = `https://${url.host}/functions/v1/api`
     return json(buildSpec(base, !!MCP_SECRET))
   }
 
