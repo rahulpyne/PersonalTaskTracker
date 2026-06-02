@@ -446,34 +446,10 @@ export function Composer({ onAdd, defaultCat }) {
         </div>
       )}
       <div className="composer">
-        {/* Mic button */}
-        {canVoice && (
-          <button
-            className={`composer-mic-btn ${voiceState === 'recording' ? 'recording' : ''} ${voiceState === 'transcribing' ? 'transcribing' : ''}`}
-            onClick={handleMicClick}
-            disabled={voiceState === 'transcribing'}
-            title={voiceState === 'recording' ? `Stop recording (${fmtElapsed(elapsed)})` : 'Voice input (Whisper)'}
-          >
-            {voiceState === 'transcribing' ? (
-              <span className="composer-mic-spin">⟳</span>
-            ) : voiceState === 'recording' ? (
-              <>
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-                <span className="composer-mic-timer">{fmtElapsed(elapsed)}</span>
-              </>
-            ) : (
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="9" y="2" width="6" height="11" rx="3"/>
-                <path d="M19 10a7 7 0 0 1-14 0M12 19v3M8 22h8"/>
-              </svg>
-            )}
-          </button>
-        )}
-
         <input
           ref={inputRef}
           className="title-input"
-          placeholder={voiceState === 'recording' ? `Listening… ${fmtElapsed(elapsed)}` : 'Add a task — or tap 🎤 to speak'}
+          placeholder={voiceState === 'recording' ? `Listening… ${fmtElapsed(elapsed)}` : 'Add a task…'}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
@@ -488,6 +464,29 @@ export function Composer({ onAdd, defaultCat }) {
           <button className={prio === 'medium' ? 'on' : ''} onClick={() => setPrio('medium')}>M</button>
           <button className={prio === 'low'    ? 'on' : ''} onClick={() => setPrio('low')}>L</button>
         </div>
+        {/* Mic button — sits right beside Add */}
+        {canVoice && (
+          <button
+            className={`composer-mic-btn ${voiceState === 'recording' ? 'recording' : ''} ${voiceState === 'transcribing' ? 'transcribing' : ''}`}
+            onClick={handleMicClick}
+            disabled={voiceState === 'transcribing'}
+            title={voiceState === 'recording' ? `Stop (${fmtElapsed(elapsed)})` : 'Voice input'}
+          >
+            {voiceState === 'transcribing' ? (
+              <span className="composer-mic-spin">⟳</span>
+            ) : voiceState === 'recording' ? (
+              <>
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                <span className="composer-mic-timer">{fmtElapsed(elapsed)}</span>
+              </>
+            ) : (
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="9" y="2" width="6" height="11" rx="3"/>
+                <path d="M19 10a7 7 0 0 1-14 0M12 19v3M8 22h8"/>
+              </svg>
+            )}
+          </button>
+        )}
         <button className="add-btn" disabled={!text.trim() || voiceState !== 'idle'} onClick={submit}>
           <IconPlus size={14} /> Add
         </button>

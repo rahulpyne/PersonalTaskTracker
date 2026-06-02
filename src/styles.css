@@ -258,13 +258,13 @@ input, textarea { font: inherit; color: inherit; background: transparent; border
 .composer-wrap { position: sticky; bottom: 0; padding: 14px 24px 22px; background: linear-gradient(to bottom, transparent, var(--bg) 30%); }
 @media (max-width: 860px) { .composer-wrap { padding: 10px 12px 14px; } }
 .composer {
-  display: grid; grid-template-columns: 1fr auto auto auto; gap: 6px;
+  display: flex; align-items: center; gap: 6px;
   border: 1px solid var(--line); background: var(--bg); padding: 8px; border-radius: 14px;
-  box-shadow: var(--shadow); align-items: center;
+  box-shadow: var(--shadow);
   transition: border-color .18s ease, box-shadow .18s ease;
 }
 .composer:focus-within { border-color: var(--line-2); box-shadow: 0 1px 0 oklch(0.85 0.008 80), 0 16px 40px -20px oklch(0.5 0.02 80 / .35); }
-.composer input.title-input { padding: 8px 12px; font-size: 14.5px; width: 100%; }
+.composer input.title-input { flex: 1; min-width: 0; padding: 8px 12px; font-size: 14.5px; }
 .composer input.title-input::placeholder { color: var(--ink-3); }
 .seg { display: inline-flex; padding: 3px; background: var(--bg-2); border-radius: 10px; font-family: var(--mono); font-size: 10.5px; }
 .seg button { padding: 5px 9px; border-radius: 7px; color: var(--ink-3); transition: background .15s ease, color .15s ease; letter-spacing: 0.04em; }
