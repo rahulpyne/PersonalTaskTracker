@@ -611,7 +611,7 @@ export default function Notes({ focusNoteId, onFocusClear }) {
               {transcript.trim() && (
                 <button
                   className="voice-btn voice-btn-ghost"
-                  onClick={() => { setTranscript(''); transcriptRef.current = '' }}
+                  onClick={() => setTranscript('')}
                 >
                   Clear
                 </button>
