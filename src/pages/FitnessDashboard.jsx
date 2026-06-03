@@ -4,7 +4,7 @@
  *           05 Recovery & goals · 06 Training plan · 07 Insights & feed
  */
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, MotionConfig } from 'framer-motion'
 import { MapContainer, TileLayer, Polyline, useMap } from 'react-leaflet'
 import { supabase } from '../lib/supabase'
 
@@ -2031,12 +2031,16 @@ function StrengthVolumeChart({ workouts }) {
           return (
             <g key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} style={{ cursor: 'pointer' }}>
               <rect x={pL + i*bw2} y={pT} width={bw2} height={iH} fill="transparent"/>
-              <motion.rect x={x} y={y} width={bw3} height={Math.max(bh, 2)} rx="3"
-                fill={d.isCurrent ? ORANGE : hover === i ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.14)'}
-                initial={{ scaleY: 0, transformOrigin: `${x + bw3/2}px ${pT+iH}px` }}
+              <motion.g
+                style={{ transformOrigin: `${x + bw3/2}px ${pT+iH}px`, transformBox: 'view-box' }}
+                initial={{ scaleY: 0 }}
                 animate={{ scaleY: 1 }}
                 transition={{ duration: 0.6, delay: i * 0.05, ease: [0.2, 0.7, 0.2, 1] }}
-              />
+              >
+                <rect x={x} y={y} width={bw3} height={Math.max(bh, 2)} rx="3"
+                  fill={d.isCurrent ? ORANGE : hover === i ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.14)'}
+                />
+              </motion.g>
               {d.isCurrent && d.vol_lbs > 0 && (
                 <motion.text x={x + bw3/2} y={y - 7} textAnchor="middle" fontFamily="var(--fd-mono)" fontSize="9.5" fill={ORANGE}
                   initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.7 }}>
@@ -2941,6 +2945,7 @@ export default function FitnessDashboard(){
   const today=new Date()
 
   return(
+    <MotionConfig reducedMotion="never">
     <div className="fd" style={{background:'#161412',minHeight:'100%',color:'#f7f5f1'}}>
       <Ticker acts={data.acts} metrics={data.metrics}/>
 
@@ -3194,5 +3199,6 @@ export default function FitnessDashboard(){
         </div>
       </div>
     </div>
+    </MotionConfig>
   )
 }
