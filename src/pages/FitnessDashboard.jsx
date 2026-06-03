@@ -571,7 +571,7 @@ function Ticker({acts,metrics}){
 // ── Section header ────────────────────────────────────────────────────────────
 function SectionHead({num,title,label,right}){
   return(
-    <motion.div initial={{opacity:0,y:30}} whileInView={{opacity:1,y:0}} viewport={{once:true,amount:0.3}} transition={{duration:0.55,ease:[0.2,0.7,0.2,1]}}
+    <motion.div initial={{opacity:0,y:30}} animate={{opacity:1,y:0}} transition={{duration:0.55,ease:[0.2,0.7,0.2,1]}}
       style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',gap:18,marginBottom:20,paddingBottom:16,borderBottom:'1px solid rgba(255,255,255,0.06)'}}>
       <div style={{display:'flex',alignItems:'flex-end',gap:20}}>
         <span style={{fontFamily:'var(--fd-mono)',fontSize:11,color:'var(--fd-ink3)',letterSpacing:'.16em',paddingBottom:3}}>{num}</span>
@@ -1196,8 +1196,7 @@ function Goals({goals}) {
 
         return (
           <motion.div key={g.slug ?? g.id}
-            initial={{opacity:0, y:12}} whileInView={{opacity:1, y:0}}
-            viewport={{once:true, amount:0.4}}
+            initial={{opacity:0, y:12}} animate={{opacity:1, y:0}}
             transition={{duration:0.45, delay:i*0.08, ease:[0.2,0.7,0.2,1]}}
             style={{
               background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.06)',
@@ -1219,8 +1218,7 @@ function Goals({goals}) {
             {/* Progress bar */}
             <div style={{height:6, borderRadius:3, background:'rgba(255,255,255,0.08)', overflow:'hidden'}}>
               <motion.div
-                initial={{width:0}} whileInView={{width:`${pct*100}%`}}
-                viewport={{once:true}} transition={{duration:0.9, delay:0.2+i*0.08, ease:[0.2,0.7,0.2,1]}}
+                initial={{width:0}} animate={{width:`${pct*100}%`}} transition={{duration:0.9, delay:0.2+i*0.08, ease:[0.2,0.7,0.2,1]}}
                 style={{height:'100%', borderRadius:3, background: pct >= 1 ? 'var(--good)' : typeColor}}/>
             </div>
 
@@ -1258,7 +1256,7 @@ function Plan({plan}){
         const date=new Date(weekStart);date.setDate(date.getDate()+i)
         const color=item?(TC[item.type]||ORANGE):'rgba(255,255,255,0.2)'
         return(
-          <motion.div key={day} initial={{opacity:0,y:14,scale:isToday?0.92:0.96}} whileInView={{opacity:1,y:0,scale:isToday?1.04:1}} viewport={{once:true,amount:0.2}}
+          <motion.div key={day} initial={{opacity:0,y:14,scale:isToday?0.92:0.96}} animate={{opacity:1,y:0,scale:isToday?1.04:1}}
             transition={{type:'spring',stiffness:220,damping:22,delay:0.1+i*0.06}}
             style={{background:isToday?`linear-gradient(180deg,${ORANGE}10,rgba(255,255,255,0.02) 60%)`:'rgba(255,255,255,0.02)',border:`1px solid ${isToday?ORANGE:'rgba(255,255,255,0.06)'}`,borderRadius:12,padding:'14px 12px',display:'flex',flexDirection:'column',gap:8,position:'relative',minHeight:160,boxShadow:isToday?`0 12px 36px -16px ${ORANGE}50`:undefined}}>
             <span style={{position:'absolute',left:0,top:14,bottom:14,width:3,borderRadius:2,background:color}}/>
@@ -1267,7 +1265,7 @@ function Plan({plan}){
             {isPast&&item&&(
               <div style={{position:'absolute',top:12,right:12,width:18,height:18,borderRadius:'50%',background:'var(--good)',display:'flex',alignItems:'center',justifyContent:'center'}}>
                 <svg width="11" height="11" viewBox="0 0 14 14">
-                  <motion.path d="M2.5 7.5 L5.5 10.5 L11.5 4" fill="none" stroke="#0e0c0a" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" initial={{pathLength:0}} whileInView={{pathLength:1}} viewport={{once:true}} transition={{duration:0.5,delay:0.6+i*0.06}}/>
+                  <motion.path d="M2.5 7.5 L5.5 10.5 L11.5 4" fill="none" stroke="#0e0c0a" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" initial={{pathLength:0}} animate={{pathLength:1}} transition={{duration:0.5,delay:0.6+i*0.06}}/>
                 </svg>
               </div>
             )}
@@ -1293,7 +1291,7 @@ function Plan({plan}){
 function InsightCard({ insight, workouts = [], exercisePRs = {}, bodyweightLbs }){
   const [tab, setTab] = useState('endurance')
   return(
-    <motion.div initial={{opacity:0,y:24}} whileInView={{opacity:1,y:0}} viewport={{once:true,amount:0.3}} transition={{duration:0.6,ease:[0.2,0.7,0.2,1]}}
+    <motion.div initial={{opacity:0,y:24}} animate={{opacity:1,y:0}} transition={{duration:0.6,ease:[0.2,0.7,0.2,1]}}
       style={{background:'linear-gradient(180deg,var(--fd-surface) 0%,#1a1714 100%)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:18,padding:22,height:'100%',overflowY:'auto',boxSizing:'border-box'}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
         <div style={{display:'inline-flex',gap:3,background:'rgba(255,255,255,0.04)',borderRadius:8,padding:3}}>
@@ -1315,7 +1313,7 @@ function InsightCard({ insight, workouts = [], exercisePRs = {}, bodyweightLbs }
           </p>
           <ul style={{margin:0,padding:0,listStyle:'none',display:'flex',flexDirection:'column',gap:10}}>
             {insight.insights?.list?.map((s,i)=>(
-              <motion.li key={i} initial={{opacity:0,x:-10}} whileInView={{opacity:1,x:0}} viewport={{once:true}} transition={{delay:0.3+i*0.12,duration:0.4}}
+              <motion.li key={i} initial={{opacity:0,x:-10}} animate={{opacity:1,x:0}} transition={{delay:0.3+i*0.12,duration:0.4}}
                 style={{display:'grid',gridTemplateColumns:'16px 1fr',gap:12,alignItems:'flex-start',fontSize:13,lineHeight:1.55,color:'var(--fd-ink2)'}}>
                 <span style={{width:6,height:6,borderRadius:'50%',background:ORANGE,marginTop:7,display:'block'}}/>
                 <span>{s}</span>
