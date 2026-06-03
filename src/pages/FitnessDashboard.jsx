@@ -649,7 +649,7 @@ function WeeklyBars({data}){
           return(
             <g key={i} style={{cursor:'pointer'}} onMouseEnter={()=>setHover(i)} onMouseLeave={()=>setHover(null)}>
               <rect x={pL+i*bw} y={pT} width={bw} height={iH} fill="transparent"/>
-              <motion.g style={{transformOrigin:`${x+bwidth/2}px ${pT+iH}px`,transformBox:'view-box'}}
+              <motion.g style={{transformBox:'view-box',transformOrigin:`${x+bwidth/2}px ${pT+iH}px`,transformBox:'view-box'}}
                 initial={{scaleY:0,opacity:d.isCurrent?1:0.7}} animate={{scaleY:1,opacity:hover===i?1:d.isCurrent?1:0.7}}
                 transition={{duration:0.7,delay:i*0.06,ease:[0.2,0.7,0.2,1]}}>
                 <rect x={x} y={y} width={bwidth} height={Math.max(bh,1)} rx="3" fill={d.isCurrent?ORANGE:'rgba(255,255,255,0.2)'}/>
@@ -941,7 +941,7 @@ function Runner(){const c=TC.run;return(
   <svg viewBox="0 0 280 280" width="280" height="280">
     <motion.ellipse cx="140" cy="246" rx="46" ry="4" fill="rgba(0,0,0,0.5)" animate={{rx:[46,40,46],opacity:[0.5,0.3,0.5]}} transition={{duration:0.55,repeat:Infinity,ease:'easeInOut'}}/>
     <line x1="20" y1="240" x2="260" y2="240" stroke="rgba(255,255,255,0.1)" strokeWidth="1" strokeDasharray="2 4"/>
-    <motion.g animate={{y:[0,-9,0]}} transition={{duration:0.55,repeat:Infinity,ease:'easeInOut'}}>
+    <g style={{transformBox:'view-box',animation:'fd-bob-9 0.55s ease-in-out infinite'}}>
       <path d="M132 110 L148 110 L154 175 L126 175 Z" fill={c} stroke="#0e0c0a" strokeWidth="2"/>
       <rect x="135" y="100" width="10" height="14" fill={skin}/>
       <circle cx="140" cy="90" r="18" fill={skin} stroke="#0e0c0a" strokeWidth="2"/>
@@ -949,31 +949,31 @@ function Runner(){const c=TC.run;return(
       <circle cx="148" cy="89" r="1.6" fill="#0e0c0a"/>
       <path d="M146 84 L152 85" stroke="#0e0c0a" strokeWidth="1.6" strokeLinecap="round"/>
       <rect x="121" y="84" width="38" height="4" fill={c} stroke="#0e0c0a" strokeWidth="1.2"/>
-      <motion.g style={{transformOrigin:'132px 118px'}} animate={{rotate:[-55,35,-55]}} transition={{duration:0.55,repeat:Infinity,ease:'easeInOut'}}>
+      <g style={{transformOrigin:'132px 118px',transformBox:'view-box',animation:'fd-rot-n55-p35 0.55s ease-in-out infinite'}}>
         <rect x="124" y="116" width="8" height="36" rx="4" fill={skin} stroke="#0e0c0a" strokeWidth="1.6"/>
         <rect x="124" y="148" width="8" height="30" rx="4" fill={c} stroke="#0e0c0a" strokeWidth="1.6"/>
         <circle cx="128" cy="180" r="5" fill={skin} stroke="#0e0c0a" strokeWidth="1.4"/>
-      </motion.g>
-      <motion.g style={{transformOrigin:'148px 118px'}} animate={{rotate:[35,-55,35]}} transition={{duration:0.55,repeat:Infinity,ease:'easeInOut'}}>
+      </g>
+      <g style={{transformOrigin:'148px 118px',transformBox:'view-box',animation:'fd-rot-p35-n55 0.55s ease-in-out infinite'}}>
         <rect x="148" y="116" width="8" height="36" rx="4" fill={skin} stroke="#0e0c0a" strokeWidth="1.6"/>
         <rect x="148" y="148" width="8" height="30" rx="4" fill={c} stroke="#0e0c0a" strokeWidth="1.6"/>
         <circle cx="152" cy="180" r="5" fill={skin} stroke="#0e0c0a" strokeWidth="1.4"/>
-      </motion.g>
-    </motion.g>
-    <motion.g style={{transformOrigin:'134px 178px'}} animate={{rotate:[40,-50,40]}} transition={{duration:0.55,repeat:Infinity,ease:'easeInOut'}}>
+      </g>
+    </g>
+    <g style={{transformOrigin:'134px 178px',transformBox:'view-box',animation:'fd-rot-p40-n50 0.55s ease-in-out infinite'}}>
       <rect x="128" y="176" width="12" height="40" rx="5" fill="#1a1714" stroke="#0e0c0a" strokeWidth="1.6"/>
       <rect x="124" y="214" width="22" height="10" rx="3" fill={shoe} stroke="#0e0c0a" strokeWidth="1.6"/>
       <rect x="124" y="222" width="22" height="3" fill={c}/>
-    </motion.g>
-    <motion.g style={{transformOrigin:'146px 178px'}} animate={{rotate:[-50,40,-50]}} transition={{duration:0.55,repeat:Infinity,ease:'easeInOut'}}>
+    </g>
+    <g style={{transformOrigin:'146px 178px',transformBox:'view-box',animation:'fd-rot-n50-p40 0.55s ease-in-out infinite'}}>
       <rect x="140" y="176" width="12" height="40" rx="5" fill="#1a1714" stroke="#0e0c0a" strokeWidth="1.6"/>
       <rect x="134" y="214" width="22" height="10" rx="3" fill={shoe} stroke="#0e0c0a" strokeWidth="1.6"/>
       <rect x="134" y="222" width="22" height="3" fill={c}/>
-    </motion.g>
-    <motion.g animate={{x:[-30,60],opacity:[0,0.7,0]}} transition={{duration:0.7,repeat:Infinity,ease:'linear'}}>
+    </g>
+    <g style={{animation:'fd-speed 0.7s linear infinite'}}>
       <line x1="60" y1="180" x2="100" y2="180" stroke="rgba(255,255,255,0.3)" strokeWidth="1.2"/>
       <line x1="70" y1="200" x2="110" y2="200" stroke="rgba(255,255,255,0.25)" strokeWidth="1.2"/>
-    </motion.g>
+    </g>
   </svg>
 )}
 function Cyclist(){const c=TC.ride;return(
@@ -985,122 +985,122 @@ function Cyclist(){const c=TC.ride;return(
     </g>
     <rect x="170" y="110" width="22" height="4" rx="2" fill="#f7f5f1"/><rect x="110" y="115" width="22" height="6" rx="3" fill="#f7f5f1"/>
     {[{cx:80},{cx:200}].map(({cx},i)=>(
-      <motion.g key={i} style={{transformOrigin:`${cx}px 220px`}} animate={{rotate:360}} transition={{duration:0.6,repeat:Infinity,ease:'linear'}}>
+      <g key={i} style={{transformOrigin:`${cx}px 220px`,transformBox:'view-box',animation:'fd-spin 0.6s linear infinite'}}>
         <circle cx={cx} cy="220" r="32" fill="none" stroke="#f7f5f1" strokeWidth="3"/>
         <circle cx={cx} cy="220" r="3" fill="#f7f5f1"/>
         <line x1={cx} y1="190" x2={cx} y2="250" stroke="rgba(255,255,255,0.4)" strokeWidth="1.2"/>
         <line x1={cx-30} y1="220" x2={cx+30} y2="220" stroke="rgba(255,255,255,0.4)" strokeWidth="1.2"/>
-      </motion.g>
+      </g>
     ))}
-    <motion.g animate={{y:[0,-1,0]}} transition={{duration:0.6,repeat:Infinity,ease:'easeInOut'}}>
+    <g style={{transformBox:'view-box',animation:'fd-bob-1 0.6s ease-in-out infinite'}}>
       <path d="M118 150 L168 118 L176 128 L126 162 Z" fill={c} stroke="#0e0c0a" strokeWidth="2"/>
       <circle cx="178" cy="110" r="14" fill={skin} stroke="#0e0c0a" strokeWidth="2"/>
       <path d="M166 104 Q170 92 186 92 Q198 96 192 110 L188 110 Q190 100 178 100 Q170 102 166 110 Z" fill={c} stroke="#0e0c0a" strokeWidth="1.6"/>
-    </motion.g>
+    </g>
   </svg>
 )}
 function Walker(){const c=TC.walk;return(
   <svg viewBox="0 0 280 280" width="280" height="280">
     <motion.ellipse cx="140" cy="246" rx="38" ry="4" fill="rgba(0,0,0,0.45)" animate={{rx:[38,34,38]}} transition={{duration:0.9,repeat:Infinity,ease:'easeInOut'}}/>
-    <motion.g animate={{y:[0,-4,0]}} transition={{duration:0.9,repeat:Infinity,ease:'easeInOut'}}>
+    <g style={{transformBox:'view-box',animation:'fd-bob-4 0.9s ease-in-out infinite'}}>
       <circle cx="140" cy="80" r="18" fill={skin} stroke="#0e0c0a" strokeWidth="2"/>
       <path d="M122 76 Q124 60 140 60 Q156 60 158 76 Q158 70 140 68 Q122 70 122 76 Z" fill={hair}/>
       <rect x="136" y="96" width="8" height="14" fill={skin}/>
       <rect x="128" y="108" width="24" height="50" rx="8" fill={c} stroke="#0e0c0a" strokeWidth="2"/>
-      <motion.g style={{transformOrigin:'132px 120px'}} animate={{rotate:[-28,12,-28]}} transition={{duration:0.9,repeat:Infinity,ease:'easeInOut'}}>
+      <g style={{transformOrigin:'132px 120px',transformBox:'view-box',animation:'fd-rot-n28-p12 0.9s ease-in-out infinite'}}>
         <rect x="126" y="116" width="8" height="34" rx="4" fill={skin} stroke="#0e0c0a" strokeWidth="1.5"/>
-      </motion.g>
-      <motion.g style={{transformOrigin:'148px 120px'}} animate={{rotate:[12,-28,12]}} transition={{duration:0.9,repeat:Infinity,ease:'easeInOut'}}>
+      </g>
+      <g style={{transformOrigin:'148px 120px',transformBox:'view-box',animation:'fd-rot-p12-n28 0.9s ease-in-out infinite'}}>
         <rect x="146" y="116" width="8" height="34" rx="4" fill={skin} stroke="#0e0c0a" strokeWidth="1.5"/>
-      </motion.g>
-    </motion.g>
-    <motion.g style={{transformOrigin:'134px 162px'}} animate={{rotate:[-18,22,-18]}} transition={{duration:0.9,repeat:Infinity,ease:'easeInOut'}}>
+      </g>
+    </g>
+    <g style={{transformOrigin:'134px 162px',transformBox:'view-box',animation:'fd-rot-n18-p22 0.9s ease-in-out infinite'}}>
       <rect x="128" y="158" width="10" height="38" rx="5" fill="#1a1714" stroke="#0e0c0a" strokeWidth="1.5"/>
       <rect x="122" y="193" width="20" height="9" rx="3" fill={shoe} stroke="#0e0c0a" strokeWidth="1.5"/>
-    </motion.g>
-    <motion.g style={{transformOrigin:'146px 162px'}} animate={{rotate:[22,-18,22]}} transition={{duration:0.9,repeat:Infinity,ease:'easeInOut'}}>
+    </g>
+    <g style={{transformOrigin:'146px 162px',transformBox:'view-box',animation:'fd-rot-p22-n18 0.9s ease-in-out infinite'}}>
       <rect x="142" y="158" width="10" height="38" rx="5" fill="#1a1714" stroke="#0e0c0a" strokeWidth="1.5"/>
       <rect x="138" y="193" width="20" height="9" rx="3" fill={shoe} stroke="#0e0c0a" strokeWidth="1.5"/>
-    </motion.g>
+    </g>
   </svg>
 )}
 function Weightlifter(){const c=TC.strength;return(
   <svg viewBox="0 0 280 280" width="280" height="280">
     <motion.ellipse cx="140" cy="246" rx="44" ry="4" fill="rgba(0,0,0,0.5)" animate={{rx:[44,42,44]}} transition={{duration:1.2,repeat:Infinity,ease:'easeInOut'}}/>
-    <motion.g animate={{y:[0,-6,0]}} transition={{duration:1.2,repeat:Infinity,ease:'easeInOut'}}>
+    <g style={{transformBox:'view-box',animation:'fd-bob-6 1.2s ease-in-out infinite'}}>
       <circle cx="140" cy="82" r="20" fill={skin} stroke="#0e0c0a" strokeWidth="2"/>
       <path d="M120 78 Q122 60 140 58 Q158 60 160 78 Q158 70 140 68 Q122 70 120 78 Z" fill={hair}/>
       <rect x="130" y="98" width="20" height="60" rx="10" fill={c} stroke="#0e0c0a" strokeWidth="2"/>
       {/* Barbell */}
-      <motion.g animate={{y:[0,-4,0],rotate:[0,-2,0]}} transition={{duration:1.2,repeat:Infinity,ease:'easeInOut'}} style={{transformOrigin:'140px 130px'}}>
+      <g style={{transformOrigin:'140px 130px',transformBox:'view-box',animation:'fd-barbell 1.2s ease-in-out infinite'}}>
         <rect x="60" y="126" width="160" height="8" rx="4" fill="#888"/>
         <rect x="56" y="116" width="20" height="28" rx="4" fill="#555"/>
         <rect x="40" y="120" width="20" height="20" rx="4" fill="#444"/>
         <rect x="204" y="116" width="20" height="28" rx="4" fill="#555"/>
         <rect x="220" y="120" width="20" height="20" rx="4" fill="#444"/>
-      </motion.g>
-      <motion.g style={{transformOrigin:'118px 118px'}} animate={{rotate:[-30,10,-30]}} transition={{duration:1.2,repeat:Infinity,ease:'easeInOut'}}>
+      </g>
+      <g style={{transformOrigin:'118px 118px',transformBox:'view-box',animation:'fd-rot-n30-p10 1.2s ease-in-out infinite'}}>
         <rect x="112" y="112" width="8" height="40" rx="4" fill={skin} stroke="#0e0c0a" strokeWidth="1.6"/>
-      </motion.g>
-      <motion.g style={{transformOrigin:'162px 118px'}} animate={{rotate:[30,-10,30]}} transition={{duration:1.2,repeat:Infinity,ease:'easeInOut'}}>
+      </g>
+      <g style={{transformOrigin:'162px 118px',transformBox:'view-box',animation:'fd-rot-p30-n10 1.2s ease-in-out infinite'}}>
         <rect x="160" y="112" width="8" height="40" rx="4" fill={skin} stroke="#0e0c0a" strokeWidth="1.6"/>
-      </motion.g>
+      </g>
       <rect x="122" y="160" width="14" height="42" rx="5" fill="#1a1714" stroke="#0e0c0a" strokeWidth="1.5"/>
       <rect x="144" y="160" width="14" height="42" rx="5" fill="#1a1714" stroke="#0e0c0a" strokeWidth="1.5"/>
       <rect x="115" y="197" width="24" height="9" rx="3" fill={shoe}/>
       <rect x="141" y="197" width="24" height="9" rx="3" fill={shoe}/>
-    </motion.g>
+    </g>
   </svg>
 )}
 function Yogi(){const c=TC.yoga;return(
   <svg viewBox="0 0 280 280" width="280" height="280">
     <motion.ellipse cx="140" cy="242" rx="50" ry="5" fill="rgba(0,0,0,0.35)" animate={{rx:[50,46,50]}} transition={{duration:3,repeat:Infinity,ease:'easeInOut'}}/>
-    <motion.g animate={{y:[0,-3,0]}} transition={{duration:3,repeat:Infinity,ease:'easeInOut'}}>
+    <g style={{transformBox:'view-box',animation:'fd-bob-3 3s ease-in-out infinite'}}>
       <circle cx="140" cy="76" r="18" fill={skin} stroke="#0e0c0a" strokeWidth="2"/>
       <path d="M122 72 Q124 56 140 54 Q156 56 158 72" fill={hair}/>
       <rect x="132" y="90" width="16" height="50" rx="8" fill={c} stroke="#0e0c0a" strokeWidth="2"/>
-      <motion.g style={{transformOrigin:'132px 106px'}} animate={{rotate:[-70,70,-70]}} transition={{duration:3,repeat:Infinity,ease:'easeInOut'}}>
+      <g style={{transformOrigin:'132px 106px',transformBox:'view-box',animation:'fd-rot-n70-p70 3s ease-in-out infinite'}}>
         <rect x="124" y="100" width="8" height="38" rx="4" fill={skin} stroke="#0e0c0a" strokeWidth="1.5"/>
         <circle cx="128" cy="140" r="5" fill={skin} stroke="#0e0c0a" strokeWidth="1.3"/>
-      </motion.g>
-      <motion.g style={{transformOrigin:'148px 106px'}} animate={{rotate:[70,-70,70]}} transition={{duration:3,repeat:Infinity,ease:'easeInOut'}}>
+      </g>
+      <g style={{transformOrigin:'148px 106px',transformBox:'view-box',animation:'fd-rot-p70-n70 3s ease-in-out infinite'}}>
         <rect x="148" y="100" width="8" height="38" rx="4" fill={skin} stroke="#0e0c0a" strokeWidth="1.5"/>
         <circle cx="152" cy="140" r="5" fill={skin} stroke="#0e0c0a" strokeWidth="1.3"/>
-      </motion.g>
-      <motion.g style={{transformOrigin:'134px 148px'}} animate={{rotate:[-45,0,-45]}} transition={{duration:3,repeat:Infinity,ease:'easeInOut'}}>
+      </g>
+      <g style={{transformOrigin:'134px 148px',transformBox:'view-box',animation:'fd-rot-n45-z 3s ease-in-out infinite'}}>
         <rect x="128" y="140" width="10" height="40" rx="5" fill={c} stroke="#0e0c0a" strokeWidth="1.5"/>
         <rect x="120" y="177" width="22" height="8" rx="3" fill={shoe}/>
-      </motion.g>
-      <motion.g style={{transformOrigin:'146px 148px'}} animate={{rotate:[45,0,45]}} transition={{duration:3,repeat:Infinity,ease:'easeInOut'}}>
+      </g>
+      <g style={{transformOrigin:'146px 148px',transformBox:'view-box',animation:'fd-rot-p45-z 3s ease-in-out infinite'}}>
         <rect x="142" y="140" width="10" height="40" rx="5" fill={c} stroke="#0e0c0a" strokeWidth="1.5"/>
         <rect x="138" y="177" width="22" height="8" rx="3" fill={shoe}/>
-      </motion.g>
+      </g>
       <motion.circle cx="140" cy="76" r="24" fill="none" stroke={c} strokeWidth="1.5" strokeDasharray="3 4" opacity="0.4" animate={{rotate:360}} transition={{duration:6,repeat:Infinity,ease:'linear'}}/>
-    </motion.g>
+    </g>
   </svg>
 )}
 function HIITFigure(){const c=TC.hiit;return(
   <svg viewBox="0 0 280 280" width="280" height="280">
     <motion.ellipse cx="140" cy="246" rx="42" ry="4" fill="rgba(0,0,0,0.5)" animate={{rx:[42,36,42]}} transition={{duration:0.4,repeat:Infinity,ease:'easeInOut'}}/>
-    <motion.g animate={{y:[0,-14,0],scaleY:[1,1.04,1]}} transition={{duration:0.4,repeat:Infinity,ease:'easeInOut'}}>
+    <g style={{transformBox:'view-box',animation:'fd-bob-14s 0.4s ease-in-out infinite'}}>
       <circle cx="140" cy="82" r="18" fill={skin} stroke="#0e0c0a" strokeWidth="2"/>
       <path d="M122 78 Q124 62 140 60 Q156 62 158 78" fill={hair}/>
       <rect x="128" y="96" width="24" height="52" rx="10" fill={c} stroke="#0e0c0a" strokeWidth="2"/>
-      <motion.g style={{transformOrigin:'128px 112px'}} animate={{rotate:[-80,40,-80]}} transition={{duration:0.4,repeat:Infinity,ease:'easeInOut'}}>
+      <g style={{transformOrigin:'128px 112px',transformBox:'view-box',animation:'fd-rot-n80-p40 0.4s ease-in-out infinite'}}>
         <rect x="120" y="106" width="8" height="30" rx="4" fill={skin} stroke="#0e0c0a" strokeWidth="1.5"/>
-      </motion.g>
-      <motion.g style={{transformOrigin:'152px 112px'}} animate={{rotate:[40,-80,40]}} transition={{duration:0.4,repeat:Infinity,ease:'easeInOut'}}>
+      </g>
+      <g style={{transformOrigin:'152px 112px',transformBox:'view-box',animation:'fd-rot-p40-n80 0.4s ease-in-out infinite'}}>
         <rect x="152" y="106" width="8" height="30" rx="4" fill={skin} stroke="#0e0c0a" strokeWidth="1.5"/>
-      </motion.g>
-      <motion.g style={{transformOrigin:'132px 152px'}} animate={{rotate:[60,-60,60]}} transition={{duration:0.4,repeat:Infinity,ease:'easeInOut'}}>
+      </g>
+      <g style={{transformOrigin:'132px 152px',transformBox:'view-box',animation:'fd-rot-p60-n60 0.4s ease-in-out infinite'}}>
         <rect x="126" y="148" width="10" height="36" rx="5" fill="#1a1714" stroke="#0e0c0a" strokeWidth="1.5"/>
         <rect x="118" y="180" width="22" height="9" rx="3" fill={shoe}/>
-      </motion.g>
-      <motion.g style={{transformOrigin:'148px 152px'}} animate={{rotate:[-60,60,-60]}} transition={{duration:0.4,repeat:Infinity,ease:'easeInOut'}}>
+      </g>
+      <g style={{transformOrigin:'148px 152px',transformBox:'view-box',animation:'fd-rot-n60-p60 0.4s ease-in-out infinite'}}>
         <rect x="144" y="148" width="10" height="36" rx="5" fill="#1a1714" stroke="#0e0c0a" strokeWidth="1.5"/>
         <rect x="140" y="180" width="22" height="9" rx="3" fill={shoe}/>
-      </motion.g>
-    </motion.g>
+      </g>
+    </g>
     {[0,1,2].map(i=>(
       <motion.circle key={i} cx={110+i*20} cy="240" r="3" fill={c} opacity="0.6"
         animate={{y:[0,-10,0],opacity:[0.6,0,0.6]}} transition={{duration:0.4,delay:i*0.13,repeat:Infinity}}/>

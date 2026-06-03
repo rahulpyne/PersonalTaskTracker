@@ -1588,3 +1588,37 @@ details[open] .done-summary::before { content: '▼ '; }
     margin: 0 12px 10px;
   }
 }
+
+/* ── Fitness figure CSS animations (replaces framer-motion SVG transforms) ── */
+@keyframes fd-bob-9  { from,to{transform:translateY(0)}    50%{transform:translateY(-9px)} }
+@keyframes fd-bob-4  { from,to{transform:translateY(0)}    50%{transform:translateY(-4px)} }
+@keyframes fd-bob-6  { from,to{transform:translateY(0)}    50%{transform:translateY(-6px)} }
+@keyframes fd-bob-3  { from,to{transform:translateY(0)}    50%{transform:translateY(-3px)} }
+@keyframes fd-bob-1  { from,to{transform:translateY(0)}    50%{transform:translateY(-1px)} }
+@keyframes fd-bob-14s{ from,to{transform:translateY(0) scaleY(1)} 50%{transform:translateY(-14px) scaleY(1.04)} }
+@keyframes fd-barbell{ from,to{transform:translateY(0) rotate(0deg)} 50%{transform:translateY(-4px) rotate(-2deg)} }
+@keyframes fd-speed  { from{transform:translateX(-30px);opacity:0} 50%{opacity:0.7} to{transform:translateX(60px);opacity:0} }
+@keyframes fd-spin   { to{transform:rotate(360deg)} }
+/* run */
+@keyframes fd-rot-n55-p35 { from,to{transform:rotate(-55deg)} 50%{transform:rotate(35deg)}  }
+@keyframes fd-rot-p35-n55 { from,to{transform:rotate( 35deg)} 50%{transform:rotate(-55deg)} }
+@keyframes fd-rot-p40-n50 { from,to{transform:rotate( 40deg)} 50%{transform:rotate(-50deg)} }
+@keyframes fd-rot-n50-p40 { from,to{transform:rotate(-50deg)} 50%{transform:rotate( 40deg)} }
+/* walk */
+@keyframes fd-rot-n28-p12 { from,to{transform:rotate(-28deg)} 50%{transform:rotate( 12deg)} }
+@keyframes fd-rot-p12-n28 { from,to{transform:rotate( 12deg)} 50%{transform:rotate(-28deg)} }
+@keyframes fd-rot-n18-p22 { from,to{transform:rotate(-18deg)} 50%{transform:rotate( 22deg)} }
+@keyframes fd-rot-p22-n18 { from,to{transform:rotate( 22deg)} 50%{transform:rotate(-18deg)} }
+/* lift */
+@keyframes fd-rot-n30-p10 { from,to{transform:rotate(-30deg)} 50%{transform:rotate( 10deg)} }
+@keyframes fd-rot-p30-n10 { from,to{transform:rotate( 30deg)} 50%{transform:rotate(-10deg)} }
+/* yoga */
+@keyframes fd-rot-n70-p70 { from,to{transform:rotate(-70deg)} 50%{transform:rotate( 70deg)} }
+@keyframes fd-rot-p70-n70 { from,to{transform:rotate( 70deg)} 50%{transform:rotate(-70deg)} }
+@keyframes fd-rot-n45-z   { from,to{transform:rotate(-45deg)} 50%{transform:rotate(  0deg)} }
+@keyframes fd-rot-p45-z   { from,to{transform:rotate( 45deg)} 50%{transform:rotate(  0deg)} }
+/* hiit */
+@keyframes fd-rot-n80-p40 { from,to{transform:rotate(-80deg)} 50%{transform:rotate( 40deg)} }
+@keyframes fd-rot-p40-n80 { from,to{transform:rotate( 40deg)} 50%{transform:rotate(-80deg)} }
+@keyframes fd-rot-p60-n60 { from,to{transform:rotate( 60deg)} 50%{transform:rotate(-60deg)} }
+@keyframes fd-rot-n60-p60 { from,to{transform:rotate(-60deg)} 50%{transform:rotate( 60deg)} }
