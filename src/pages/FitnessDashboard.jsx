@@ -728,6 +728,11 @@ function DualTrend({daily}){
 // ── 26-week heatmap ───────────────────────────────────────────────────────────
 function Heatmap({cells,streakDays=new Set()}){
   const[tip,setTip]=useState(null)
+  const scrollRef=useRef(null)
+  // Scroll to the rightmost (most recent) weeks on mount and whenever cells change
+  useEffect(()=>{
+    if(scrollRef.current) scrollRef.current.scrollLeft=scrollRef.current.scrollWidth
+  },[cells])
   const grid=useMemo(()=>{
     const first=cells[0].dateObj,fd=first.getDay()===0?6:first.getDay()-1
     const cols=[],col=new Array(7).fill(null);let pos=fd
@@ -751,7 +756,7 @@ function Heatmap({cells,streakDays=new Set()}){
   const legendColors=['rgba(255,255,255,0.05)','oklch(38% 0.07 145)','oklch(52% 0.13 145)','oklch(65% 0.17 145)','oklch(76% 0.20 130)',ORANGE]
   return(
     <div style={{position:'relative',overflow:'hidden'}}>
-      <div style={{overflowX:'auto',paddingBottom:6}}>
+      <div ref={scrollRef} style={{overflowX:'auto',paddingBottom:6}}>
         <div style={{display:'grid',gridTemplateColumns:'24px 1fr',gap:6,minWidth:720}}>
           <div style={{display:'grid',gridTemplateRows:'repeat(7, 14px)',gap:3,fontFamily:'var(--fd-mono)',fontSize:9,color:'var(--fd-ink3)',paddingTop:14}}>
             {['','Mon','','Wed','','Fri',''].map((d,i)=><span key={i} style={{display:'flex',alignItems:'center',height:14}}>{d}</span>)}
