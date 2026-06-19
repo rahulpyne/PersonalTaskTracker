@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { IconCheck, IconPencil, IconTrash, IconPlus } from './Icons'
 import { toggleSubtask, generateSubtasks } from '../lib/tasks'
 import { startRecording, stopRecording, transcribeAudio, isVoiceSupported } from '../lib/voice'
@@ -31,6 +31,83 @@ function parseLinks(notes) {
 
 function stripLinks(notes) {
   return (notes || '').replace(/🔗\s*/g, '').replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, '').trim()
+}
+
+// ── Staleness helpers ─────────────────────────────────────────────────────────
+// Returns { days, level, color, label } for a pending task
+function getStaleness(createdMs) {
+  const days = Math.max(0, Math.floor((Date.now() - (createdMs || Date.now())) / 86400000))
+  if (days >= 30) return { days, level:'ancient', color:'oklch(68% 0.22 28)', label:'revive?' }
+  if (days >= 14) return { days, level:'old',     color:'oklch(73% 0.19 48)', label:'old idea' }
+  if (days >= 7)  return { days, level:'stale',   color:'oklch(79% 0.16 70)', label:'stale'    }
+  if (days >= 3)  return { days, level:'aging',   color:'rgba(247,245,241,.55)', label:null     }
+  return              { days, level:'fresh',   color:'var(--ink-3)',          label:null     }
+}
+
+// Auto-priority score: stale tasks get a boost so older medium/low ideas surface above newer ones
+function priorityScore(t) {
+  const base  = t.prio === 'high' ? 30 : t.prio === 'medium' ? 20 : 10
+  const days  = Math.max(0, Math.floor((Date.now() - (t.created || 0)) / 86400000))
+  const boost = days < 4 ? 0 : days < 8 ? 3 : days < 15 ? 6 : days < 31 ? 9 : 13
+  return base + boost
+}
+
+// ── Recurring task helpers ─────────────────────────────────────────────────────
+const MAX_RECURRING     = 5
+const RECUR_PERIODS     = { daily:1, weekly:7, monthly:30 }
+// Color scale: 0=none, 1=amber, 2=deep-amber, 3+=orange-red
+const RECUR_COLORS      = [null, 'oklch(79% 0.16 72)', 'oklch(72% 0.20 50)', 'oklch(65% 0.24 28)']
+const RECUR_MISS_LABELS = ['', 'missed once', 'missed twice', 'missed 3+×']
+
+function _lastCompletion(task) {
+  const ms = RECUR_PERIODS[task.schedule] * 86400000
+  if (task.completions?.length)
+    return Math.max(...task.completions.map(c => new Date(c).getTime()))
+  return new Date(task.createdAt).getTime() - ms
+}
+
+function getMissedCount(task) {
+  const ms      = RECUR_PERIODS[task.schedule] * 86400000
+  const last    = _lastCompletion(task)
+  const elapsed = Date.now() - last
+  if (elapsed < ms) return 0
+  // subtract 1: the current in-progress period is not yet missed
+  return Math.min(3, Math.max(0, Math.floor(elapsed / ms) - 1))
+}
+
+function getNextDue(task) {
+  const ms = RECUR_PERIODS[task.schedule] * 86400000
+  return new Date(_lastCompletion(task) + ms)
+}
+
+// Seed with "Call mom" weekly task — created 8 days ago so it shows as missed-once on first load
+const SEED_RECURRING = [
+  { id:'call-mom', title:'Call mom', schedule:'weekly',
+    createdAt: new Date(Date.now() - 8 * 86400000).toISOString(), completions:[] }
+]
+
+function useRecurring() {
+  const [tasks, setTasks] = useState(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('tracker:recurring'))
+      if (Array.isArray(s) && s.length) return s
+    } catch {}
+    return SEED_RECURRING
+  })
+  useEffect(() => { localStorage.setItem('tracker:recurring', JSON.stringify(tasks)) }, [tasks])
+
+  const complete = useCallback(id => {
+    const today = new Date().toISOString().slice(0, 10)
+    setTasks(ts => ts.map(t => t.id === id
+      ? { ...t, completions: [...(t.completions || []).filter(c => c !== today), today] }
+      : t))
+  }, [])
+  const add = useCallback(({ title, schedule }) => {
+    if (!title.trim()) return
+    setTasks(ts => [...ts, { id:'rec-'+Date.now(), title:title.trim(), schedule, createdAt:new Date().toISOString(), completions:[] }])
+  }, [])
+  const remove = useCallback(id => setTasks(ts => ts.filter(t => t.id !== id)), [])
+  return { tasks, complete, add, remove }
 }
 
 // ── WeightDots ────────────────────────────────────────────────────────────────
@@ -194,14 +271,23 @@ function SubtaskPanel({ task, visible, aiGenerating = false, aiError = null }) {
 }
 
 // ── TaskItem ──────────────────────────────────────────────────────────────────
-function TaskItem({ t, onToggle, onDelete, onSaveNote, onRefresh, openId, setOpenId }) {
+function TaskItem({ t, onToggle, onDelete, onSaveNote, onUpdate, onRefresh, openId, setOpenId }) {
   const open  = openId === t.id
   const [draft,        setDraft]        = useState(t.notes || '')
   const [aiGenerating, setAiGenerating] = useState(false)
   const [aiError,      setAiError]      = useState(null)
-  const taRef = useRef(null)
 
-  useEffect(() => { setDraft(t.notes || '') }, [t.id, t.notes])
+  // ── Inline edit state ─────────────────────────────────────────────────────
+  const [editing,    setEditing]    = useState(false)
+  const [editTitle,  setEditTitle]  = useState(t.title)
+  const [editCat,    setEditCat]    = useState(t.cat)
+  const [editPrio,   setEditPrio]   = useState(t.prio)
+  const editInputRef = useRef(null)
+  const taRef        = useRef(null)
+
+  useEffect(() => { setDraft(t.notes || '') },        [t.id, t.notes])
+  useEffect(() => { setEditTitle(t.title) },          [t.id, t.title])
+  useEffect(() => { setEditCat(t.cat); setEditPrio(t.prio) }, [t.id, t.cat, t.prio])
 
   useEffect(() => {
     if (open && taRef.current) {
@@ -210,11 +296,43 @@ function TaskItem({ t, onToggle, onDelete, onSaveNote, onRefresh, openId, setOpe
     }
   }, [open])
 
+  useEffect(() => {
+    if (editing && editInputRef.current) {
+      editInputRef.current.focus()
+      editInputRef.current.select()
+    }
+  }, [editing])
+
   const commit = () => { if (draft !== t.notes) onSaveNote(t.id, draft) }
 
   const toggleOpen = (e) => {
     e.stopPropagation()
+    if (editing) return          // don't open notes while editing
     setOpenId(open ? null : t.id)
+  }
+
+  const startEdit = (e) => {
+    e.stopPropagation()
+    setEditTitle(t.title)
+    setEditCat(t.cat)
+    setEditPrio(t.prio)
+    setEditing(true)
+  }
+
+  const cancelEdit = () => {
+    setEditing(false)
+    setEditTitle(t.title)
+    setEditCat(t.cat)
+    setEditPrio(t.prio)
+  }
+
+  const saveEdit = () => {
+    const trimmed = editTitle.trim()
+    if (!trimmed) return cancelEdit()
+    setEditing(false)
+    if (trimmed !== t.title || editCat !== t.cat || editPrio !== t.prio) {
+      onUpdate(t.id, { title: trimmed, cat: editCat, prio: editPrio })
+    }
   }
 
   // AI icon click: expand task + generate subtasks
@@ -235,49 +353,98 @@ function TaskItem({ t, onToggle, onDelete, onSaveNote, onRefresh, openId, setOpe
   }, [t, aiGenerating, setOpenId, onRefresh])
 
   return (
-    <div className={`task ${t.done ? 'done' : ''} ${open ? 'note-open' : ''}`}>
+    <div className={`task ${t.done ? 'done' : ''} ${open ? 'note-open' : ''} ${editing ? 'task-editing' : ''}`}>
 
       {/* Checkbox */}
-      <button className="check" aria-label="toggle done" onClick={() => onToggle(t.id)}>
+      <button className="check" aria-label="toggle done" onClick={() => { if (!editing) onToggle(t.id) }}>
         <IconCheck />
       </button>
 
-      {/* Body — click to expand */}
-      <div className="body" onClick={toggleOpen} style={{ cursor: 'pointer' }}>
-        <div className="title">{t.title}</div>
-        <div className="row">
-          <span className={`chip ${t.cat}`}>
-            <span className="micon" style={{ display: 'inline-flex', alignItems: 'center' }}>
-              {t.cat === 'work'
-                ? <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 12h18" /></svg>
-                : <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z" /></svg>
-              }
-            </span>
-            {t.cat}
-          </span>
-          <span className={`chip prio-${t.prio === 'high' ? 'high' : t.prio === 'medium' ? 'med' : 'low'}`}>
-            <span className="swatch" />
-            {t.prio}
-          </span>
-          <span>· added {prettyDate(t.created)}</span>
-          {t.done && t.completed && <span>· done {prettyDate(t.completed)}</span>}
+      {/* Body */}
+      {editing ? (
+        /* ── Edit mode ── */
+        <div className="body task-edit-form" onClick={e => e.stopPropagation()}>
+          <input
+            ref={editInputRef}
+            className="task-edit-input"
+            value={editTitle}
+            onChange={e => setEditTitle(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter')  { e.preventDefault(); saveEdit() }
+              if (e.key === 'Escape') cancelEdit()
+            }}
+            placeholder="Task title…"
+          />
+          <div className="task-edit-row">
+            <div className="seg" role="group" aria-label="category">
+              <button className={editCat === 'work'     ? 'on' : ''} onClick={() => setEditCat('work')}>WORK</button>
+              <button className={editCat === 'personal' ? 'on' : ''} onClick={() => setEditCat('personal')}>PERSONAL</button>
+            </div>
+            <div className="seg" role="group" aria-label="priority">
+              <button className={editPrio === 'high'   ? 'on' : ''} onClick={() => setEditPrio('high')}>H</button>
+              <button className={editPrio === 'medium' ? 'on' : ''} onClick={() => setEditPrio('medium')}>M</button>
+              <button className={editPrio === 'low'    ? 'on' : ''} onClick={() => setEditPrio('low')}>L</button>
+            </div>
+            <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+              <button className="task-edit-cancel" onClick={cancelEdit}>Cancel</button>
+              <button className="task-edit-save"   onClick={saveEdit}   disabled={!editTitle.trim()}>Save</button>
+            </div>
+          </div>
         </div>
-        {t.notes && !open && <div className="note-preview">{t.notes}</div>}
-      </div>
+      ) : (
+        /* ── Normal view mode ── */
+        <div className="body" onClick={toggleOpen} style={{ cursor: 'pointer' }}>
+          <div className="title">{t.title}</div>
+          {(() => {
+            const stale = !t.done ? getStaleness(t.created) : null
+            return (
+              <div className="row">
+                <span className={`chip ${t.cat}`}>
+                  <span className="micon" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    {t.cat === 'work'
+                      ? <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 12h18" /></svg>
+                      : <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z" /></svg>
+                    }
+                  </span>
+                  {t.cat}
+                </span>
+                <span className={`chip prio-${t.prio === 'high' ? 'high' : t.prio === 'medium' ? 'med' : 'low'}`}>
+                  <span className="swatch" />
+                  {t.prio}
+                </span>
+                {/* Staleness badge — shows for pending tasks 3+ days old */}
+                {stale && stale.level !== 'fresh'
+                  ? <span className={`stale-badge stale-${stale.level}`} style={{ color: stale.color }}
+                          title={`Pending ${stale.days} days — auto-priority boosted`}>
+                      {stale.days >= 30 ? '30+d' : `${stale.days}d`}{stale.label ? ` · ${stale.label}` : ''}
+                    </span>
+                  : <span>· added {prettyDate(t.created)}</span>
+                }
+                {t.done && t.completed && <span>· done {prettyDate(t.completed)}</span>}
+              </div>
+            )
+          })()}
+          {t.notes && !open && <div className="note-preview">{t.notes}</div>}
+        </div>
+      )}
 
       {/* Action buttons — edit | delete | ✦ AI */}
       <div className="actions">
-        <button className="icon-btn" title={open ? 'close' : 'notes'} onClick={toggleOpen}>
+        <button
+          className={`icon-btn${editing ? ' active' : ''}`}
+          title={editing ? 'cancel edit' : 'edit task'}
+          onClick={editing ? cancelEdit : startEdit}
+        >
           <IconPencil />
         </button>
-        <button className="icon-btn danger" title="delete" onClick={() => onDelete(t.id)}>
+        <button className="icon-btn danger" title="delete" onClick={() => { if (!editing) onDelete(t.id) }}>
           <IconTrash />
         </button>
         <button
           className={`icon-btn ai-icon-btn${aiGenerating ? ' spinning' : ''}`}
           title="Generate AI subtasks"
           onClick={handleAIClick}
-          disabled={aiGenerating}
+          disabled={aiGenerating || editing}
         >
           {aiGenerating
             ? <span className="ai-btn-dot-spin" />
@@ -285,81 +452,250 @@ function TaskItem({ t, onToggle, onDelete, onSaveNote, onRefresh, openId, setOpe
         </button>
       </div>
 
-      {/* Expanded area */}
-      <div className="notes-wrap">
-        <div className="notes-inner">
+      {/* Expanded notes/subtask area — hidden while editing */}
+      {!editing && (
+        <div className="notes-wrap">
+          <div className="notes-inner">
 
-          <SubtaskPanel
-            task={t}
-            visible={open}
-            aiGenerating={aiGenerating}
-            aiError={aiError}
-          />
+            <SubtaskPanel
+              task={t}
+              visible={open}
+              aiGenerating={aiGenerating}
+              aiError={aiError}
+            />
 
-          <div className="notes-divider">Notes</div>
+            <div className="notes-divider">Notes</div>
 
-          <textarea
-            ref={taRef}
-            className="notes"
-            value={draft}
-            placeholder="Add context, links, or additional notes…"
-            onChange={(e) => {
-              setDraft(e.target.value)
-              e.target.style.height = 'auto'
-              e.target.style.height = e.target.scrollHeight + 'px'
-            }}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') setOpenId(null)
-              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { commit(); setOpenId(null) }
-            }}
-            onClick={e => e.stopPropagation()}
-          />
-          <div className="notes-hint">esc to close · ⌘↵ to save</div>
+            <textarea
+              ref={taRef}
+              className="notes"
+              value={draft}
+              placeholder="Add context, links, or additional notes…"
+              onChange={(e) => {
+                setDraft(e.target.value)
+                e.target.style.height = 'auto'
+                e.target.style.height = e.target.scrollHeight + 'px'
+              }}
+              onBlur={commit}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setOpenId(null)
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { commit(); setOpenId(null) }
+              }}
+              onClick={e => e.stopPropagation()}
+            />
+            <div className="notes-hint">esc to close · ⌘↵ to save</div>
+          </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+// ── RecurringTaskItem ─────────────────────────────────────────────────────────
+function RecurringTaskItem({ task, onComplete, onRemove }) {
+  const missed      = getMissedCount(task)
+  const color       = RECUR_COLORS[Math.min(missed, RECUR_COLORS.length - 1)]
+  const nextDue     = getNextDue(task)
+  const lastDone    = task.completions?.length
+    ? task.completions.reduce((a, b) => a > b ? a : b)
+    : null
+  const ms            = RECUR_PERIODS[task.schedule] * 86400000
+  const periodStart   = nextDue.getTime() - ms
+  const doneThisPeriod = (task.completions || []).some(c => new Date(c).getTime() >= periodStart)
+  const isOverdue     = !doneThisPeriod && Date.now() > nextDue.getTime()
+
+  return (
+    <div className={`task recur-task${missed > 0 && !doneThisPeriod ? ' recur-missed' : ''}${doneThisPeriod ? ' recur-done' : ''}`}
+         style={color && !doneThisPeriod ? { '--rc': color, borderColor:`${color}44` } : {}}>
+      {/* Left color strip — intensifies with missed count */}
+      {color && !doneThisPeriod && <span className="recur-strip" style={{ background:color }}/>}
+
+      <button className={`check${doneThisPeriod ? ' done' : ''}`}
+              aria-label={doneThisPeriod ? 'Already done this period' : 'Mark done'}
+              onClick={() => onComplete(task.id)}>
+        <IconCheck />
+      </button>
+
+      <div className="body" style={{ cursor:'default' }}>
+        <div className="title" style={doneThisPeriod ? { color:'var(--ink-3)', textDecoration:'line-through' } : {}}>
+          {task.title}
+        </div>
+        <div className="row">
+          {/* Schedule chip */}
+          <span className="chip" style={color && !doneThisPeriod
+            ? { background:`${color}1a`, borderColor:`${color}55`, color }
+            : {}}>
+            ↻ {task.schedule}
+          </span>
+          {/* Missed badge */}
+          {!doneThisPeriod && missed > 0 && (
+            <span className="chip" style={{ background:`${color}22`, borderColor:`${color}55`, color, fontWeight:600 }}>
+              ⚠ {RECUR_MISS_LABELS[Math.min(missed, RECUR_MISS_LABELS.length - 1)]}
+            </span>
+          )}
+          {/* Due / done status */}
+          {doneThisPeriod
+            ? <span style={{ color:'var(--good)' }}>✓ done this period</span>
+            : isOverdue
+              ? <span style={{ color: color || 'var(--warn)' }}>· overdue since {prettyDate(nextDue.getTime())}</span>
+              : <span>· due {prettyDate(nextDue.getTime())}</span>
+          }
+          {lastDone && <span>· last {prettyDate(new Date(lastDone).getTime())}</span>}
+        </div>
+      </div>
+
+      <div className="actions" style={{ opacity:1 }}>
+        <button className="icon-btn danger" title="Remove recurring task"
+                onClick={e => { e.stopPropagation(); onRemove(task.id) }}>
+          <IconTrash />
+        </button>
       </div>
     </div>
   )
 }
 
-// ── TaskList ──────────────────────────────────────────────────────────────────
-export function TaskList({ tasks, onToggle, onDelete, onSaveNote, onRefresh }) {
-  const [openId, setOpenId] = useState(null)
+// ── RecurringComposer ─────────────────────────────────────────────────────────
+function RecurringComposer({ onAdd, remaining }) {
+  const [open,     setOpen]     = useState(false)
+  const [title,    setTitle]    = useState('')
+  const [schedule, setSchedule] = useState('weekly')
+  const inputRef = useRef(null)
+  useEffect(() => { if (open) inputRef.current?.focus() }, [open])
 
-  if (!tasks.length) {
+  const submit = () => {
+    if (!title.trim() || remaining <= 0) return
+    onAdd({ title, schedule })
+    setTitle(''); setOpen(false)
+  }
+
+  return (
+    <div className="recur-composer-wrap">
+      {!open ? (
+        <button className="recur-add-btn" onClick={() => remaining > 0 && setOpen(true)}
+                disabled={remaining <= 0}
+                title={remaining > 0 ? 'Add a recurring task' : 'Maximum 5 recurring tasks reached'}>
+          <IconPlus size={11}/> Add recurring{remaining < MAX_RECURRING ? ` (${remaining} left)` : ''}
+        </button>
+      ) : (
+        <div className="recur-form">
+          <input ref={inputRef} className="task-edit-input" value={title}
+                 placeholder="Recurring task title…" onChange={e => setTitle(e.target.value)}
+                 onKeyDown={e => { if (e.key==='Enter') submit(); if (e.key==='Escape') setOpen(false) }}/>
+          <div className="task-edit-row" style={{ marginTop:8 }}>
+            <div className="seg" role="group" aria-label="schedule">
+              {['daily','weekly','monthly'].map(s => (
+                <button key={s} className={schedule===s?'on':''} onClick={()=>setSchedule(s)}>
+                  {s[0].toUpperCase()+s.slice(1)}
+                </button>
+              ))}
+            </div>
+            <div style={{ display:'flex', gap:6, marginLeft:'auto' }}>
+              <button className="task-edit-cancel" onClick={()=>setOpen(false)}>Cancel</button>
+              <button className="task-edit-save"   onClick={submit} disabled={!title.trim()}>Add</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── TaskList ──────────────────────────────────────────────────────────────────
+const DONE_PAGE_SIZE = 5
+
+export function TaskList({ tasks, onToggle, onDelete, onSaveNote, onUpdate, onRefresh }) {
+  const [openId,   setOpenId]   = useState(null)
+  const [donePage, setDonePage] = useState(1)
+  const { tasks: recurring, complete: completeRecurring, add: addRecurring, remove: removeRecurring } = useRecurring()
+
+  // Sort pending by auto-priority score (base priority + staleness boost)
+  const pending = useMemo(() =>
+    tasks.filter(t => !t.done).slice().sort((a, b) => priorityScore(b) - priorityScore(a)),
+    [tasks]
+  )
+  // Sort done newest-completed first
+  const done = useMemo(() =>
+    tasks.filter(t => t.done).slice().sort((a, b) => (b.completed ?? 0) - (a.completed ?? 0)),
+    [tasks]
+  )
+
+  const doneCount = done.length
+  useEffect(() => { setDonePage(1) }, [doneCount])
+
+  const totalPages = Math.ceil(done.length / DONE_PAGE_SIZE)
+  const donePage_  = Math.min(donePage, totalPages || 1)
+  const pageSlice  = done.slice((donePage_ - 1) * DONE_PAGE_SIZE, donePage_ * DONE_PAGE_SIZE)
+
+  const hasContent = tasks.length > 0 || recurring.length > 0
+
+  if (!hasContent) {
     return (
-      <div className="empty">
-        <span>Nothing here.</span>
-        <div className="sub">A clean inbox is also a kind of progress.</div>
-      </div>
+      <>
+        <div className="empty">
+          <span>Nothing here.</span>
+          <div className="sub">A clean inbox is also a kind of progress.</div>
+        </div>
+        <RecurringComposer onAdd={addRecurring} remaining={MAX_RECURRING - recurring.length}/>
+      </>
     )
   }
 
-  const pending = tasks.filter(t => !t.done)
-  const done    = tasks.filter(t =>  t.done)
-
   return (
     <div className="list">
-      {pending.length > 0 && (
+
+      {/* ── Scheduled / Recurring tasks ── */}
+      {recurring.length > 0 && (
         <>
           <div className="group-label">
-            <span>To do</span><span className="rule" /><span>{pending.length}</span>
+            <span>↻ Scheduled</span><span className="rule" />
+            <span>{recurring.length}/{MAX_RECURRING}</span>
           </div>
-          {pending.map(t => (
-            <TaskItem key={t.id} t={t} onToggle={onToggle} onDelete={onDelete}
-              onSaveNote={onSaveNote} onRefresh={onRefresh} openId={openId} setOpenId={setOpenId} />
+          {recurring.map(t => (
+            <RecurringTaskItem key={t.id} task={t} onComplete={completeRecurring} onRemove={removeRecurring}/>
           ))}
         </>
       )}
+      <RecurringComposer onAdd={addRecurring} remaining={MAX_RECURRING - recurring.length}/>
+
+      {/* ── Pending (priority-sorted) ── */}
+      {pending.length > 0 && (
+        <>
+          <div className="group-label" style={{ marginTop: recurring.length > 0 ? 20 : 0 }}>
+            <span>To do</span><span className="rule" />
+            <span style={{ fontFamily:'var(--mono)', fontSize:10, color:'var(--ink-3)', fontWeight:400 }}>priority order</span>
+            <span className="rule" /><span>{pending.length}</span>
+          </div>
+          {pending.map(t => (
+            <TaskItem key={t.id} t={t} onToggle={onToggle} onDelete={onDelete}
+              onSaveNote={onSaveNote} onUpdate={onUpdate} onRefresh={onRefresh} openId={openId} setOpenId={setOpenId}/>
+          ))}
+        </>
+      )}
+
+      {/* ── Done (paginated, newest first) ── */}
       {done.length > 0 && (
         <>
           <div className="group-label">
             <span>Done</span><span className="rule" /><span>{done.length}</span>
           </div>
-          {done.map(t => (
+          {pageSlice.map(t => (
             <TaskItem key={t.id} t={t} onToggle={onToggle} onDelete={onDelete}
-              onSaveNote={onSaveNote} onRefresh={onRefresh} openId={openId} setOpenId={setOpenId} />
+              onSaveNote={onSaveNote} onUpdate={onUpdate} onRefresh={onRefresh} openId={openId} setOpenId={setOpenId}/>
           ))}
+          {totalPages > 1 && (
+            <div className="done-pagination">
+              <button className="dpg-btn" disabled={donePage_ <= 1}
+                      onClick={() => setDonePage(p => p - 1)} aria-label="Previous page">←</button>
+              <div className="dpg-pages">
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                  <button key={p} className={`dpg-page${p === donePage_ ? ' active' : ''}`}
+                          onClick={() => setDonePage(p)} aria-label={`Page ${p}`}>{p}</button>
+                ))}
+              </div>
+              <button className="dpg-btn" disabled={donePage_ >= totalPages}
+                      onClick={() => setDonePage(p => p + 1)} aria-label="Next page">→</button>
+            </div>
+          )}
         </>
       )}
     </div>

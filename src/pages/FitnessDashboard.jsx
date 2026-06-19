@@ -1,7 +1,8 @@
 /**
- * FitnessDashboard v3 — primary fitness view
- * Sections: 01 This week · 02 Activity focus · 03 Routes map · 04 Heatmap
- *           05 Recovery & goals · 06 Training plan · 07 Insights & feed
+ * FitnessDashboard v4 — primary fitness view
+ * Sections: 01 This week · 02 GPS routes · 03 Heatmap
+ *           04 Strava Training Intelligence (Fitness/Freshness, HR Zones, Weekly Load, YoY, Best Efforts)
+ *           05 Apple Health · 06 Recovery & goals · 07 Strength lab · 08 Training plan · 09 Insights
  */
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { motion, AnimatePresence, MotionConfig } from 'framer-motion'
@@ -11,7 +12,7 @@ import { supabase } from '../lib/supabase'
 // ── Palette ───────────────────────────────────────────────────────────────────
 const TC = {
   run:'oklch(72% 0.19 25)', ride:'oklch(72% 0.18 250)', swim:'oklch(75% 0.16 200)',
-  walk:'oklch(70% 0.10 110)', hike:'oklch(72% 0.12 130)', strength:'oklch(72% 0.18 300)',
+  walk:'oklch(70% 0.10 110)', hike:'oklch(70% 0.22 240)', strength:'oklch(72% 0.18 300)',
   yoga:'oklch(75% 0.14 160)', hiit:'oklch(78% 0.20 50)', workout:'oklch(70% 0.08 260)',
   cardio:'oklch(70% 0.08 260)',
 }
@@ -54,16 +55,8 @@ const MUSCLE_COLORS = {
   quadriceps:'oklch(65% 0.16 280)',quads:'oklch(65% 0.16 280)',     hamstrings:'oklch(62% 0.14 300)',
   glutes:'oklch(62% 0.14 320)',     calves:'oklch(60% 0.12 300)',   hip_flexors:'oklch(60% 0.13 310)',
 }
-const TAB_OPTS = [
-  {k:'all',l:'All'},{k:'run',l:'Run'},{k:'ride',l:'Ride'},{k:'swim',l:'Swim'},
-  {k:'strength',l:'Strength'},{k:'yoga',l:'Yoga'},{k:'hiit',l:'HIIT'},{k:'walk',l:'Walk'},
-]
 const DAYS_KEY  = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']
 const DAYS_ABBR = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
-const FIGURE_LABEL = {
-  run:'Running',ride:'Cycling',swim:'Swimming',strength:'Strength',
-  yoga:'Yoga',hiit:'HIIT',walk:'Walking',hike:'Hiking',workout:'Workout',cardio:'Cardio',all:'All activity',
-}
 
 // ── Mock fallbacks ────────────────────────────────────────────────────────────
 const MOCK_GOALS = [
@@ -164,8 +157,8 @@ function useDashboardData() {
       try {
         const [actR, metR, goalsR, planR, insR, routeR, gymR, prR] = await Promise.all([
           supabase.from('fitness_activities')
-            .select('id,source,type,name,started_at,distance_m,duration_secs,moving_secs,avg_hr,max_hr,calories,elevation_gain_m,avg_speed_kmh')
-            .order('started_at',{ascending:false}).limit(200),
+            .select('id,source,type,name,started_at,distance_m,duration_secs,moving_secs,avg_hr,max_hr,calories,elevation_gain_m,avg_speed_kmh,raw->>suffer_score')
+            .order('started_at',{ascending:false}).limit(400),
           supabase.from('fitness_daily_metrics')
             .select('date,steps,active_cals,total_cals,exercise_mins,stand_hours,resting_hr,avg_hr,hrv,vo2_max,sleep_hrs,sleep_deep_hrs,sleep_rem_hrs,weight_kg')
             .order('date',{ascending:false}).limit(90),
@@ -180,7 +173,7 @@ function useDashboardData() {
             .order('started_at',{ascending:false}).limit(100),
           supabase.from('gymverse_workouts')
             .select('id,external_id,workout_name,workout_date,started_at,duration_secs,total_volume_lbs,total_volume_kg,muscle_groups,exercises')
-            .order('started_at',{ascending:false}).limit(30),
+            .order('started_at',{ascending:false}).limit(200),
           supabase.from('gymverse_exercise_prs')
             .select('exercise_name,canonical_key,best_e1rm_lbs,best_weight_lbs,best_reps,best_volume_lbs,achieved_at,history'),
         ])
@@ -195,7 +188,13 @@ function useDashboardData() {
           endLL:    Array.isArray(r.end_latlng)   ? r.end_latlng   : null,
         }))
         const gymverse  = gymR.data?.length ? gymR.data : MOCK_GYMVERSE
-        const exercisePRs = (prR.data ?? []).reduce((m, row) => { m[row.exercise_name] = row; return m }, {})
+        // Index PRs by normalised name so they match the normalised workout history keys
+        const exercisePRs = (prR.data ?? []).reduce((m, row) => {
+          const key = normaliseExerciseName(row.exercise_name) ?? row.exercise_name
+          // If two DB rows normalise to the same key, keep the one with the better PR
+          if (!m[key] || (row.best_weight_lbs ?? 0) > (m[key].best_weight_lbs ?? 0)) m[key] = row
+          return m
+        }, {})
         const gymByExtId  = (gymR.data ?? []).reduce((m, w) => { if (w.external_id) m[w.external_id] = w; return m }, {})
         const latestWeightKg = metrics.slice().reverse().find(m => m.weight_kg > 0)?.weight_kg ?? null
         const bodyweightLbs  = latestWeightKg ? Math.round(latestWeightKg * 2.205) : null
@@ -222,41 +221,90 @@ function useDashboardData() {
           .filter(a => ['run','Run'].includes(a.type) && a.started_at >= weekAgoISO)
           .reduce((s,a) => s + (a.distance_m||0), 0) / 1000).toFixed(1)
 
+        // ── Historical baseline → realistic stretch targets (+10% of past 3 months avg) ──
+        const histMonths = [1,2,3].map(mo => {
+          const d   = new Date(now.getFullYear(), now.getMonth()-mo, 1)
+          const nxt = new Date(now.getFullYear(), now.getMonth()-mo+1, 1)
+          return { start: d.toISOString().slice(0,10), end: nxt.toISOString().slice(0,10) }
+        })
+        const histRunKms = histMonths.map(({start,end}) =>
+          +(acts.filter(a=>['run','Run'].includes(a.type)&&a.started_at>=start&&a.started_at<end)
+            .reduce((s,a)=>s+(a.distance_m||0),0)/1000).toFixed(1)
+        ).filter(v=>v>0)
+        const histVolumes = histMonths.map(({start,end}) =>
+          Math.round((gymR.data??[]).filter(w=>{const d=(w.workout_date||w.started_at?.slice(0,10));return d>=start&&d<end})
+            .reduce((s,w)=>s+(w.total_volume_lbs||0),0))
+        ).filter(v=>v>0)
+        // Past 4 complete week windows (exclude current partial week)
+        const pastWeeks = [1,2,3,4].map(w => {
+          const wEnd   = new Date(now - w*7*86400000)
+          const wStart = new Date(now - (w+1)*7*86400000)
+          return { start: wStart.toISOString().slice(0,10), end: wEnd.toISOString().slice(0,10) }
+        })
+        const histWkSessions = pastWeeks.map(({start,end}) =>
+          (gymR.data??[]).filter(w=>{const d=(w.workout_date||w.started_at?.slice(0,10));return d>=start&&d<end}).length
+        ).filter(v=>v>0)
+        const histWkRunKms = pastWeeks.map(({start,end}) =>
+          +(acts.filter(a=>['run','Run'].includes(a.type)&&a.started_at>=start&&a.started_at<end)
+            .reduce((s,a)=>s+(a.distance_m||0),0)/1000).toFixed(1)
+        ).filter(v=>v>0)
+
+        const _avg      = (arr,fb) => arr.length ? arr.reduce((s,v)=>s+v,0)/arr.length : fb
+        const _clean5   = n => Math.max(5,   Math.round(n/5)*5)
+        const _clean5k  = n => Math.max(5000, Math.round(n/5000)*5000)
+
+        const targetWeekRunKm    = _clean5(_avg(histWkRunKms, 20) * 1.10)
+        const targetRunKm        = _clean5(targetWeekRunKm * 4.33)   // always consistent with weekly goal
+        const targetVolLbs       = _clean5k(_avg(histVolumes, 100000) * 1.10)
+        const targetWeekSessions = Math.max(2, Math.round(_avg(histWkSessions, 3)) + 1)
+
         // Build goal rows with computed current values
         // slug is the stable text key used for upsert (id column is UUID, not text)
         const autoGoals = [
-          { slug:'auto:run_month',      title:`Run distance — ${monthName}`,      type:'run',      unit:'km',       target_value:100,    current_value:monthRunKm,   target_date:monthEnd, status:'active' },
-          { slug:'auto:strength_month', title:`Lift volume — ${monthName}`,        type:'strength', unit:'lbs',      target_value:110000, current_value:monthVolLbs,  target_date:monthEnd, status:'active' },
-          { slug:'auto:strength_week',  title:'Strength sessions — this week',     type:'strength', unit:'sessions', target_value:4,      current_value:weekSessions, target_date:null,     status:'active' },
-          { slug:'auto:run_week',       title:'Run distance — this week',          type:'run',      unit:'km',       target_value:25,     current_value:weekRunKm,    target_date:null,     status:'active' },
+          { slug:'auto:run_month',      title:`Run distance — ${monthName}`,  type:'run',      unit:'km',       target_value:targetRunKm,        current_value:monthRunKm,   target_date:monthEnd, status:'active' },
+          { slug:'auto:strength_month', title:`Lift volume — ${monthName}`,   type:'strength', unit:'lbs',      target_value:targetVolLbs,       current_value:monthVolLbs,  target_date:monthEnd, status:'active' },
+          { slug:'auto:strength_week',  title:'Strength sessions — this week',type:'strength', unit:'sessions', target_value:targetWeekSessions, current_value:weekSessions, target_date:null,     status:'active' },
+          { slug:'auto:run_week',       title:'Run distance — this week',     type:'run',      unit:'km',       target_value:targetWeekRunKm,    current_value:weekRunKm,    target_date:null,     status:'active' },
         ]
 
         // Merge with any custom DB goals (DB takes priority for title/target, we keep live current_value)
         const dbGoals = (goalsR.data ?? [])
         const mergedGoals = autoGoals.map(ag => {
           const db = dbGoals.find(g => g.slug === ag.slug || g.id === ag.slug)
-          return db ? { ...ag, ...db, current_value: ag.current_value } : ag
+          // target_value always comes from auto-computation so goals stay consistent with each other
+          return db ? { ...ag, ...db, target_value: ag.target_value, current_value: ag.current_value, target_date: ag.target_date } : ag
         })
         // Append any DB goals not in autoGoals
         dbGoals.forEach(g => { if (!mergedGoals.find(m => m.slug === g.slug)) mergedGoals.push({...g, current_value:g.current_value??0}) })
 
         const goals = mergedGoals.map(g => ({...g, current: g.current_value ?? 0}))
 
-        // Upsert computed goals back to DB so insight-generator sees real numbers
-        // Use slug as the conflict target (unique text column) — id is auto-generated UUID
+        // Sync current progress back to DB so the insight-generator sees real numbers.
+        // Strategy: INSERT rows that don't exist yet (with full data including target_value).
+        //           For EXISTING rows only update current_value — never overwrite a manually-
+        //           set target_value so user goal edits survive dashboard reloads.
         const upsertRows = autoGoals.map(g => ({
           slug:          g.slug,
           title:         g.title,
           type:          g.type,
           unit:          g.unit,
-          target_value:  g.target_value,
+          target_value:  g.target_value,   // used only on INSERT (new rows)
           current_value: g.current_value,
           target_date:   g.target_date,
           status:        'active',
         }))
-        supabase.from('fitness_goals').upsert(upsertRows, {onConflict:'slug'}).then(({error}) => {
-          if (error) console.warn('goals upsert:', error.message)
-        })
+        // ignoreDuplicates:true → inserts new rows only, skips existing (preserves target_value)
+        supabase.from('fitness_goals')
+          .upsert(upsertRows, { onConflict:'slug', ignoreDuplicates:true })
+          .then(() => {
+            // Then update only current_value for all auto-managed slugs
+            return Promise.all(upsertRows.map(g =>
+              supabase.from('fitness_goals')
+                .update({ current_value: g.current_value, target_date: g.target_date })
+                .eq('slug', g.slug)
+            ))
+          })
+          .catch(e => console.warn('goals sync:', e.message))
 
         setD({acts,metrics,goals,plan,insight,routes,gymverse,exercisePRs,bodyweightLbs,gymByExtId})
       } catch(e) {
@@ -465,6 +513,122 @@ function computeStreak(acts){
   return {days:dayStreak,weeks:weekStreak,currentWeekActive}
 }
 
+// ── Strava-equivalent Training Intelligence ───────────────────────────────────
+// TRIMP (Bannister 1991) — training impulse when suffer_score not available
+function estimateLoad(act, restHR=60, maxHR=185){
+  const ss=act['raw->>suffer_score']??act.suffer_score
+  if(ss!=null&&+ss>0) return +ss
+  if(!act.avg_hr||!act.moving_secs) return 0
+  const ratio=Math.max(0,Math.min(1,(act.avg_hr-restHR)/(maxHR-restHR)))
+  return (act.moving_secs/60)*ratio*Math.exp(1.92*ratio)
+}
+
+// CTL (Fitness 42d EWA) · ATL (Fatigue 7d EWA) · Form = CTL − ATL
+function computeFitnessTrend(acts, metrics, totalDays=90){
+  const restMap={}; metrics.forEach(m=>{ if(m.resting_hr>0) restMap[m.date]=m.resting_hr })
+  const loadByDate={}
+  acts.forEach(a=>{
+    const date=a.started_at?.slice(0,10); if(!date) return
+    loadByDate[date]=(loadByDate[date]||0)+estimateLoad(a, restMap[date]||60)
+  })
+  const CTL_K=1/42, ATL_K=1/7; const now=new Date(); let ctl=0,atl=0
+  // 60-day warm-up seeding (not in output)
+  for(let i=totalDays+60;i>totalDays;i--){
+    const d=new Date(now); d.setDate(d.getDate()-i)
+    const load=loadByDate[d.toISOString().slice(0,10)]||0
+    ctl+=CTL_K*(load-ctl); atl+=ATL_K*(load-atl)
+  }
+  const result=[]
+  for(let i=totalDays-1;i>=0;i--){
+    const d=new Date(now); d.setDate(d.getDate()-i)
+    const date=d.toISOString().slice(0,10), load=loadByDate[date]||0
+    ctl+=CTL_K*(load-ctl); atl+=ATL_K*(load-atl)
+    result.push({date, load:Math.round(load), ctl:+ctl.toFixed(1), atl:+atl.toFixed(1), form:+(ctl-atl).toFixed(1)})
+  }
+  return result
+}
+
+// Strava HR zones — same % cutoffs Strava uses
+const HR_ZONE_DEF=[
+  {z:'Z1',label:'Recovery', lo:0,    hi:0.57, color:'oklch(68% 0.12 200)'},
+  {z:'Z2',label:'Aerobic',  lo:0.57, hi:0.76, color:'oklch(66% 0.14 145)'},
+  {z:'Z3',label:'Tempo',    lo:0.76, hi:0.84, color:ORANGE},
+  {z:'Z4',label:'Threshold',lo:0.84, hi:0.92, color:'oklch(70% 0.18 25)'},
+  {z:'Z5',label:'VO₂ Max',  lo:0.92, hi:1.01, color:'oklch(62% 0.22 0)'},
+]
+function computeHRZones(acts, maxHR=185){
+  const mins=acts.reduce((acc,a)=>{
+    if(!a.avg_hr||!a.moving_secs) return acc
+    const pct=a.avg_hr/maxHR
+    const i=HR_ZONE_DEF.findIndex(z=>pct>=z.lo&&pct<z.hi)
+    if(i>=0) acc[i]+=a.moving_secs/60
+    return acc
+  },[0,0,0,0,0])
+  return HR_ZONE_DEF.map((z,i)=>({...z, mins:Math.round(mins[i])}))
+}
+
+function computeWeeklyLoad(acts, metrics, nWeeks=16){
+  const now=new Date()
+  const restMap={}; metrics.forEach(m=>{ if(m.resting_hr>0) restMap[m.date]=m.resting_hr })
+  return Array.from({length:nWeeks},(_,rev)=>{
+    const w=nWeeks-1-rev
+    const mon=new Date(now); const dow=mon.getDay()===0?6:mon.getDay()-1
+    mon.setDate(mon.getDate()-dow-w*7); mon.setHours(0,0,0,0)
+    const sun=new Date(mon); sun.setDate(mon.getDate()+6); sun.setHours(23,59,59,999)
+    const wa=acts.filter(a=>{ const d=new Date(a.started_at); return d>=mon&&d<=sun })
+    const load=Math.round(wa.reduce((s,a)=>s+estimateLoad(a, restMap[a.started_at?.slice(0,10)]||60),0))
+    return{label:mon.toLocaleDateString('en',{month:'short',day:'numeric'}), load, count:wa.length, isCurrent:w===0}
+  })
+}
+
+function computeYearOverYear(acts){
+  const now=new Date(), cy=now.getFullYear()
+  const todayStr=now.toISOString().slice(0,10)
+  const mm=String(now.getMonth()+1).padStart(2,'0'), dd=String(now.getDate()).padStart(2,'0')
+  const lyStr=`${cy-1}-${mm}-${dd}`
+  const sum=list=>({
+    km:+(list.reduce((s,a)=>s+(a.distance_m||0),0)/1000).toFixed(0),
+    count:list.length,
+    elevM:Math.round(list.reduce((s,a)=>s+(a.elevation_gain_m||0),0)),
+    hrs:Math.round(list.reduce((s,a)=>s+(a.moving_secs||0),0)/3600),
+  })
+  return{
+    cy: sum(acts.filter(a=>a.started_at>=`${cy}-01-01`&&a.started_at<=todayStr)),
+    py: sum(acts.filter(a=>a.started_at>=`${cy-1}-01-01`&&a.started_at<=lyStr)),
+    year: cy,
+  }
+}
+
+// Riegel-formula best effort estimator from run history
+const RACE_DISTS=[
+  {m:1000,  name:'1K'},
+  {m:1609,  name:'1 mi'},
+  {m:5000,  name:'5K'},
+  {m:10000, name:'10K'},
+  {m:21097, name:'Half'},
+  {m:42195, name:'Marathon'},
+]
+function computeBestEfforts(acts){
+  const runs=acts
+    .filter(a=>(a.type==='run'||a.type==='Run')&&a.distance_m>500&&a.moving_secs>0)
+    .sort((a,b)=>new Date(b.started_at)-new Date(a.started_at))
+  return RACE_DISTS.map(dist=>{
+    // Exact-distance match (±35%)
+    const exact=runs.filter(r=>r.distance_m>=dist.m*0.88&&r.distance_m<=dist.m*1.35)
+    if(exact.length){
+      const best=exact.reduce((b,r)=>(r.moving_secs/r.distance_m)<(b.moving_secs/b.distance_m)?r:b)
+      return{...dist, secs:Math.round((best.moving_secs/best.distance_m)*dist.m), date:best.started_at?.slice(0,10)}
+    }
+    // Riegel projection from a longer run (up to 2.5× the target distance)
+    const longer=runs.filter(r=>r.distance_m>dist.m&&r.distance_m<=dist.m*2.5)
+    if(longer.length){
+      const best=longer.reduce((b,r)=>(r.moving_secs/r.distance_m)<(b.moving_secs/b.distance_m)?r:b)
+      return{...dist, secs:Math.round(best.moving_secs*Math.pow(dist.m/best.distance_m,1.06)), estimated:true}
+    }
+    return{...dist, secs:null}
+  })
+}
+
 // ── Coaching insight text ─────────────────────────────────────────────────────
 function getStatTip(type,value,delta){
   switch(type){
@@ -629,47 +793,6 @@ function StatTile({idx,type,label,value,unit,dec=0,delta,spark}){
   )
 }
 
-// ── Weekly bar chart ──────────────────────────────────────────────────────────
-function WeeklyBars({data}){
-  const ref=useRef(null);const[w,setW]=useState(560)
-  useEffect(()=>{if(!ref.current)return;const ro=new ResizeObserver(([e])=>setW(Math.max(280,e.contentRect.width)));ro.observe(ref.current);return()=>ro.disconnect()},[])
-  const[hover,setHover]=useState(null)
-  const h=260,pL=36,pR=12,pT=16,pB=30,iW=w-pL-pR,iH=h-pT-pB
-  const mx=Math.max(10,...data.map(d=>d.total_km)),yMax=Math.ceil(mx/10)*10
-  const bw=iW/data.length,ticks=[0,yMax/4,yMax/2,yMax*3/4,yMax]
-  return(
-    <div ref={ref} style={{position:'relative',minHeight:h}}>
-      <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{display:'block',width:'100%',height:'auto',overflow:'visible'}}>
-        {ticks.map((t,i)=>{const y=pT+iH-(t/yMax)*iH;return(
-          <g key={i}><line x1={pL} x2={w-pR} y1={y} y2={y} stroke="rgba(255,255,255,0.05)" strokeDasharray={i===0?'':'2 4'}/>
-          <text x={pL-8} y={y+3} textAnchor="end" fontFamily="var(--fd-mono)" fontSize="9.5" fill="var(--fd-ink3)" letterSpacing="0.04em">{Math.round(t)}</text></g>
-        )})}
-        {data.map((d,i)=>{
-          const bh=(d.total_km/yMax)*iH,x=pL+i*bw+bw*0.22,bwidth=bw*0.56,y=pT+iH-bh
-          return(
-            <g key={i} style={{cursor:'pointer'}} onMouseEnter={()=>setHover(i)} onMouseLeave={()=>setHover(null)}>
-              <rect x={pL+i*bw} y={pT} width={bw} height={iH} fill="transparent"/>
-              <motion.g style={{transformBox:'view-box',transformOrigin:`${x+bwidth/2}px ${pT+iH}px`,transformBox:'view-box'}}
-                initial={{scaleY:0,opacity:d.isCurrent?1:0.7}} animate={{scaleY:1,opacity:hover===i?1:d.isCurrent?1:0.7}}
-                transition={{duration:0.7,delay:i*0.06,ease:[0.2,0.7,0.2,1]}}>
-                <rect x={x} y={y} width={bwidth} height={Math.max(bh,1)} rx="3" fill={d.isCurrent?ORANGE:'rgba(255,255,255,0.2)'}/>
-              </motion.g>
-              {d.isCurrent&&<motion.text x={x+bwidth/2} y={y-8} textAnchor="middle" fontFamily="var(--fd-mono)" fontSize="10" fill={ORANGE} letterSpacing="0.06em" initial={{opacity:0}} animate={{opacity:1}} transition={{delay:0.7+i*0.06}}>{d.total_km.toFixed(1)}KM</motion.text>}
-              <text x={x+bwidth/2} y={h-10} textAnchor="middle" fontFamily="var(--fd-mono)" fontSize="9.5" fill="var(--fd-ink3)" letterSpacing="0.04em">{d.label}</text>
-            </g>
-          )
-        })}
-      </svg>
-      {hover!=null&&(
-        <div style={{position:'absolute',background:'#0e0c0a',border:'1px solid rgba(255,255,255,0.1)',color:'var(--fd-ink1)',padding:'9px 12px',borderRadius:8,fontFamily:'var(--fd-mono)',fontSize:10.5,letterSpacing:'.04em',pointerEvents:'none',zIndex:10,whiteSpace:'nowrap',left:`${((pL+hover*bw+bw*0.5)/w)*100}%`,top:0,transform:'translate(-50%,-100%) translateY(-8px)',boxShadow:'0 12px 32px -8px rgba(0,0,0,0.7)'}}>
-          <div style={{color:'var(--fd-ink3)',fontSize:10,marginBottom:5}}>Week of {data[hover].label}</div>
-          <b style={{fontSize:14}}>{data[hover].total_km.toFixed(1)}</b> km
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── HRV/RHR dual trend ────────────────────────────────────────────────────────
 function DualTrend({daily}){
   const ref=useRef(null);const[w,setW]=useState(560)
@@ -826,6 +949,16 @@ function FitBounds({coords}){
   return null
 }
 
+// ── Fly to searched location ──────────────────────────────────────────────────
+function FlyTo({target}){
+  const map=useMap()
+  useEffect(()=>{
+    if(!target) return
+    try { map.flyTo(target.center,target.zoom,{duration:1.4}) } catch(_){}
+  },[target])
+  return null
+}
+
 // ── GIS insight panel ─────────────────────────────────────────────────────────
 function GISPanel({gis,filter,routeCount}){
   const [tipKey,setTipKey]=useState(null)
@@ -871,10 +1004,77 @@ function GISPanel({gis,filter,routeCount}){
   )
 }
 
+// ── Static hike routes (manually added, not from Strava) ─────────────────────
+const STATIC_HIKES = [
+  {
+    id:'static-lake-serene',
+    name:'Lake Serene',
+    type:'hike',
+    coords:[
+      [47.8215,-121.5507],[47.8190,-121.5468],[47.8162,-121.5418],
+      [47.8128,-121.5366],[47.8090,-121.5316],[47.8050,-121.5268],
+      [47.8012,-121.5226],[47.7978,-121.5206],[47.7962,-121.5185],
+    ],
+  },
+  {
+    id:'static-skyline-trail',
+    name:'Skyline Trail · Mt. Rainier',
+    type:'hike',
+    coords:[
+      [46.7869,-121.7370],[46.7885,-121.7348],[46.7905,-121.7322],
+      [46.7930,-121.7305],[46.7958,-121.7308],[46.7980,-121.7322],
+      [46.7998,-121.7345],[46.8005,-121.7370],[46.7995,-121.7398],
+      [46.7978,-121.7425],[46.7952,-121.7445],[46.7925,-121.7440],
+      [46.7900,-121.7425],[46.7880,-121.7405],[46.7869,-121.7370],
+    ],
+  },
+  {
+    id:'static-tolmie-peak',
+    name:'Tolmie Peak Trail',
+    type:'hike',
+    coords:[
+      [46.9285,-121.8597],[46.9288,-121.8618],[46.9292,-121.8642],
+      [46.9290,-121.8665],[46.9284,-121.8688],[46.9281,-121.8708],
+      [46.9288,-121.8726],[46.9298,-121.8740],[46.9311,-121.8733],
+    ],
+  },
+  {
+    id:'static-colchuck-lake',
+    name:'Colchuck Lake · Cascades',
+    type:'hike',
+    coords:[
+      [47.5247,-120.8207],[47.5230,-120.8188],[47.5210,-120.8170],
+      [47.5192,-120.8150],[47.5175,-120.8128],[47.5158,-120.8106],
+      [47.5140,-120.8086],[47.5122,-120.8072],[47.5100,-120.8074],
+    ],
+  },
+]
+
 // ── Route map ─────────────────────────────────────────────────────────────────
 function RouteMap({routes}){
   const [filter,setFilter]=useState('all')
   const [hovered,setHovered]=useState(null)
+  const [searchQ,setSearchQ]=useState('')
+  const [searching,setSearching]=useState(false)
+  const [flyTarget,setFlyTarget]=useState(null)
+  const [searchErr,setSearchErr]=useState(null)
+
+  const handleSearch=async(e)=>{
+    e?.preventDefault()
+    const q=searchQ.trim(); if(!q) return
+    setSearching(true); setSearchErr(null)
+    try{
+      const res=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`,{headers:{'Accept-Language':'en'}})
+      const data=await res.json()
+      if(data.length>0){
+        const {lat,lon,boundingbox}=data[0]
+        const bb=boundingbox?.map(Number)
+        const zoom=bb?(bb[1]-bb[0]<0.5?12:bb[1]-bb[0]<2?9:7):10
+        setFlyTarget({center:[+lat,+lon],zoom})
+      } else setSearchErr('Location not found')
+    }catch{ setSearchErr('Search failed') }
+    setSearching(false)
+  }
 
   const decoded=useMemo(()=>routes.map(r=>({
     ...r,
@@ -882,52 +1082,73 @@ function RouteMap({routes}){
     color:TC[r.type]||ORANGE,
   })).filter(r=>r.coords?.length),[routes])
 
-  const filtered=filter==='all'?decoded:decoded.filter(r=>r.type===filter)
+  // Merge Strava routes with static hikes
+  const staticHikes = useMemo(()=>STATIC_HIKES.map(h=>({...h,color:TC.hike})),[])
+  const allDecoded  = useMemo(()=>[...decoded,...staticHikes],[decoded,staticHikes])
 
-  // Always open on Vancouver (Sunset Beach). User can pan/zoom freely.
-  const VANCOUVER = [49.2866, -123.1431]
+  const filtered=filter==='all'?allDecoded:allDecoded.filter(r=>r.type===filter)
 
-  // All coords kept for GIS but no longer used to auto-fit the map
-  const allCoords=useMemo(()=>filtered.flatMap(r=>r.coords),[filtered])
+  // Fit bounds to all routes (Strava + static) so map auto-centres on maximum data
+  const fitCoords=useMemo(()=>allDecoded.flatMap(r=>r.coords),[allDecoded])
+
+  // Fallback centre: Pacific Northwest. FitBounds overrides this once data loads.
+  const PNW = [47.85, -122.10]
 
   const gis=useMemo(()=>computeGIS(routes),[routes])
 
-  const typesAvailable=[...new Set(decoded.map(r=>r.type))]
-  const routeCounts={all:decoded.length,...typesAvailable.reduce((c,t)=>{c[t]=decoded.filter(r=>r.type===t).length;return c},{})}
+  const typesAvailable=[...new Set(allDecoded.map(r=>r.type))]
+  const routeCounts={all:allDecoded.length,...typesAvailable.reduce((c,t)=>{c[t]=allDecoded.filter(r=>r.type===t).length;return c},{})}
 
   return(
-    <div style={{display:'grid',gap:14,gridTemplateColumns:'1fr 280px'}}>
+    <div className="fd-twocol" style={{display:'grid',gap:14,gridTemplateColumns:'1fr 280px'}}>
       {/* Map */}
-      <div style={{position:'relative',borderRadius:16,overflow:'hidden',height:480}}>
-        {/* Filter pills */}
-        <div style={{position:'absolute',top:12,left:12,zIndex:1000,display:'flex',gap:5,flexWrap:'wrap'}}>
-          {(['all',...typesAvailable]).map(t=>(
-            <button key={t} onClick={()=>setFilter(t)}
-              style={{fontFamily:'var(--fd-mono)',fontSize:9.5,letterSpacing:'.12em',textTransform:'uppercase',padding:'5px 11px',borderRadius:999,border:'1px solid rgba(255,255,255,0.15)',cursor:'pointer',transition:'all .18s',
-                background:filter===t?(TC[t]||ORANGE):'rgba(14,12,10,0.85)',
-                color:filter===t?'#0e0c0a':'rgba(255,255,255,0.7)',backdropFilter:'blur(8px)'}}>
-              {t==='all'?`All (${decoded.length})`:`${t} (${routeCounts[t]||0})`}
-            </button>
-          ))}
+      <div style={{display:'flex',flexDirection:'column',gap:0}}>
+        {/* Search bar */}
+        <form onSubmit={handleSearch} style={{display:'flex',gap:6,marginBottom:8}}>
+          <input
+            value={searchQ} onChange={e=>{setSearchQ(e.target.value);setSearchErr(null)}}
+            placeholder="Search city or country…"
+            style={{flex:1,background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.12)',borderRadius:8,padding:'8px 12px',color:'var(--fd-ink1)',fontFamily:'var(--fd-mono)',fontSize:12,outline:'none'}}
+          />
+          <button type="submit" disabled={searching}
+            style={{padding:'8px 16px',borderRadius:8,border:'1px solid rgba(255,255,255,0.15)',background:searching?'rgba(255,255,255,0.05)':'rgba(255,255,255,0.08)',color:'var(--fd-ink2)',fontFamily:'var(--fd-mono)',fontSize:11,cursor:searching?'wait':'pointer',transition:'all .18s',whiteSpace:'nowrap'}}>
+            {searching?'…':'Zoom in'}
+          </button>
+        </form>
+        {searchErr&&<div style={{fontFamily:'var(--fd-mono)',fontSize:10,color:'var(--bad)',marginBottom:6}}>{searchErr}</div>}
+        <div className="fd-routemap-map" style={{position:'relative',borderRadius:16,overflow:'hidden',height:480}}>
+          {/* Filter pills */}
+          <div style={{position:'absolute',top:12,left:12,zIndex:1000,display:'flex',gap:5,flexWrap:'wrap'}}>
+            {(['all',...typesAvailable]).map(t=>(
+              <button key={t} onClick={()=>setFilter(t)}
+                style={{fontFamily:'var(--fd-mono)',fontSize:9.5,letterSpacing:'.12em',textTransform:'uppercase',padding:'5px 11px',borderRadius:999,border:'1px solid rgba(255,255,255,0.15)',cursor:'pointer',transition:'all .18s',
+                  background:filter===t?(TC[t]||ORANGE):'rgba(14,12,10,0.85)',
+                  color:filter===t?'#0e0c0a':'rgba(255,255,255,0.7)',backdropFilter:'blur(8px)'}}>
+                {t==='all'?`All (${allDecoded.length})`:`${t} (${routeCounts[t]||0})`}
+              </button>
+            ))}
+          </div>
+          {/* Activity count badge */}
+          <div style={{position:'absolute',bottom:12,left:12,zIndex:1000,fontFamily:'var(--fd-mono)',fontSize:10,color:'rgba(255,255,255,0.5)',background:'rgba(14,12,10,0.75)',backdropFilter:'blur(6px)',padding:'4px 10px',borderRadius:999,border:'1px solid rgba(255,255,255,0.08)'}}>
+            {filtered.length} route{filtered.length!==1?'s':''} shown
+          </div>
+          <MapContainer center={PNW} zoom={9} style={{height:'100%',width:'100%',background:'#0e0c0a'}}
+            zoomControl={true} attributionControl={false}>
+            <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+              attribution="© OpenStreetMap contributors © CARTO" maxZoom={19}/>
+            {fitCoords.length>0 && <FitBounds coords={fitCoords}/>}
+            {flyTarget && <FlyTo target={flyTarget}/>}
+            {filtered.map(r=>(
+              <Polyline key={r.id} positions={r.coords}
+                pathOptions={{color:hovered===r.id?'#ffffff':r.color,weight:hovered===r.id?3.5:2,opacity:hovered===r.id?1:0.7,lineCap:'round',lineJoin:'round'}}
+                eventHandlers={{
+                  mouseover:()=>setHovered(r.id),
+                  mouseout: ()=>setHovered(null),
+                }}
+              />
+            ))}
+          </MapContainer>
         </div>
-        {/* Activity count badge */}
-        <div style={{position:'absolute',bottom:12,left:12,zIndex:1000,fontFamily:'var(--fd-mono)',fontSize:10,color:'rgba(255,255,255,0.5)',background:'rgba(14,12,10,0.75)',backdropFilter:'blur(6px)',padding:'4px 10px',borderRadius:999,border:'1px solid rgba(255,255,255,0.08)'}}>
-          {filtered.length} route{filtered.length!==1?'s':''} shown
-        </div>
-        <MapContainer center={VANCOUVER} zoom={13} style={{height:'100%',width:'100%',background:'#0e0c0a'}}
-          zoomControl={true} attributionControl={false}>
-          <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-            attribution="© OpenStreetMap contributors © CARTO" maxZoom={19}/>
-          {filtered.map(r=>(
-            <Polyline key={r.id} positions={r.coords}
-              pathOptions={{color:hovered===r.id?'#ffffff':r.color,weight:hovered===r.id?3.5:2,opacity:hovered===r.id?1:0.65,lineCap:'round',lineJoin:'round'}}
-              eventHandlers={{
-                mouseover:()=>setHovered(r.id),
-                mouseout: ()=>setHovered(null),
-              }}
-            />
-          ))}
-        </MapContainer>
       </div>
       {/* GIS panel */}
       <GISPanel gis={gis} filter={filter} routeCount={filtered.length}/>
@@ -1108,62 +1329,6 @@ function HIITFigure(){const c=TC.hiit;return(
   </svg>
 )}
 
-const FIGURES={run:Runner,ride:Cyclist,swim:Yogi,strength:Weightlifter,yoga:Yogi,hiit:HIITFigure,walk:Walker,hike:Walker,workout:HIITFigure,cardio:HIITFigure,all:Runner}
-
-// ── Focus stage ───────────────────────────────────────────────────────────────
-function FocusStage({tab,weekActs}){
-  const Figure=FIGURES[tab]||Runner
-  const list=tab==='all'?weekActs:weekActs.filter(a=>a.type===tab)
-  const km=+(list.reduce((s,a)=>s+(a.distance_m||0),0)/1000).toFixed(1)
-  const mins=Math.round(list.reduce((s,a)=>s+(a.duration_secs||0),0)/60)
-  const color=tab==='all'?ORANGE:(TC[tab]||ORANGE)
-  return(
-    <div style={{background:'linear-gradient(180deg,var(--fd-surface) 0%,#1a1714 100%)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:18,height:360,position:'relative',overflow:'hidden',display:'flex',alignItems:'center',justifyContent:'center'}}>
-      <div style={{position:'absolute',left:0,right:0,bottom:'34%',height:1,background:'rgba(255,255,255,0.08)'}}/>
-      <div style={{position:'absolute',top:16,left:18,fontFamily:'var(--fd-mono)',fontSize:10,color:'var(--fd-ink3)',letterSpacing:'.16em',textTransform:'uppercase'}}>
-        Activity focus · <b style={{color:'var(--fd-ink1)',fontWeight:500}}>{FIGURE_LABEL[tab]||'All'}</b>
-      </div>
-      <AnimatePresence mode="wait">
-        <motion.div key={tab} initial={{opacity:0,scale:0.88,y:12}} animate={{opacity:1,scale:1,y:0}} exit={{opacity:0,scale:0.92,y:-8}} transition={{duration:0.4,ease:[0.2,0.7,0.2,1]}} style={{width:280,height:280}}>
-          <Figure/>
-        </motion.div>
-      </AnimatePresence>
-      <div style={{position:'absolute',bottom:16,left:18,right:18,display:'flex',justifyContent:'space-between',gap:14,fontFamily:'var(--fd-mono)',fontSize:10.5,color:'var(--fd-ink3)'}}>
-        <span><b style={{color:'var(--fd-ink1)',fontSize:13,marginRight:5}}>{list.length}</b>sessions</span>
-        {km>0&&<span><b style={{color:'var(--fd-ink1)',fontSize:13,marginRight:5}}>{km}</b>km</span>}
-        <span><b style={{color:'var(--fd-ink1)',fontSize:13,marginRight:5}}>{mins}</b>min</span>
-        <span style={{color}}>{FIGURE_LABEL[tab]||'All'}</span>
-      </div>
-    </div>
-  )
-}
-
-// ── Sport tabs ────────────────────────────────────────────────────────────────
-function SportTabs({value,onChange,counts}){
-  const cRef=useRef(null)
-  const[ind,setInd]=useState({left:0,width:0,opacity:0})
-  useEffect(()=>{
-    if(!cRef.current)return
-    const active=cRef.current.querySelector('[data-active="true"]')
-    if(!active)return
-    const cr=cRef.current.getBoundingClientRect(),ar=active.getBoundingClientRect()
-    setInd({left:ar.left-cr.left+cRef.current.scrollLeft,width:ar.width,opacity:1})
-  },[value])
-  return(
-    <div ref={cRef} style={{display:'flex',gap:4,padding:4,border:'1px solid rgba(255,255,255,0.06)',borderRadius:12,background:'var(--fd-surface)',overflowX:'auto',position:'relative',flexShrink:0}}>
-      <div style={{position:'absolute',top:4,bottom:4,left:ind.left,width:ind.width,background:'rgba(255,255,255,0.08)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:8,opacity:ind.opacity,transition:'left .35s cubic-bezier(.34,1.1,.64,1), width .35s cubic-bezier(.34,1.1,.64,1)',pointerEvents:'none',zIndex:0}}/>
-      {TAB_OPTS.map(opt=>(
-        <button key={opt.k} data-active={value===opt.k} onClick={()=>onChange(opt.k)}
-          style={{padding:'8px 14px',borderRadius:8,fontFamily:'var(--fd-mono)',fontSize:11,letterSpacing:'.14em',textTransform:'uppercase',color:value===opt.k?'var(--fd-ink1)':'var(--fd-ink3)',position:'relative',zIndex:1,display:'flex',alignItems:'center',gap:6,whiteSpace:'nowrap',transition:'color .2s',background:'transparent',border:'none',cursor:'pointer'}}>
-          <span style={{width:6,height:6,borderRadius:'50%',background:opt.k==='all'?'rgba(255,255,255,0.4)':(TC[opt.k]||ORANGE),display:'inline-block'}}/>
-          {opt.l}
-          {counts?.[opt.k]!=null&&<span style={{color:'var(--fd-ink3)',marginLeft:3}}>{counts[opt.k]}</span>}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 // ── Goals ─────────────────────────────────────────────────────────────────────
 function goalStatus(g) {
   const pct  = (g.current || 0) / (g.target_value || 1)
@@ -1246,36 +1411,148 @@ function Goals({goals}) {
 }
 
 // ── Training plan ─────────────────────────────────────────────────────────────
-function Plan({plan}){
+const MG_RECOVERY={chest:2,back:2,legs:3,leg:3,bicep:2,biceps:2,tricep:2,triceps:2,core:1,shoulder:2,shoulders:2}
+
+function getThisWeekDates(){
+  const d=new Date(),dow=d.getDay()
+  d.setDate(d.getDate()-(dow===0?6:dow-1))
+  d.setHours(0,0,0,0)
+  return Array.from({length:7},(_,i)=>{const nd=new Date(d);nd.setDate(d.getDate()+i);return nd.toISOString().slice(0,10)})
+}
+
+function Plan({plan,acts=[],gymverse=[],metrics=[],goals=[]}){
   const todayDow=new Date().getDay()===0?6:new Date().getDay()-1
-  const weekStart=new Date(plan.week_start+'T00:00:00')
+  const weekDates=useMemo(()=>getThisWeekDates(),[])
+
+  const actsByDow=useMemo(()=>{
+    const m={}
+    for(const a of acts){const di=weekDates.indexOf((a.started_at||'').slice(0,10));if(di>=0)(m[di]||(m[di]=[])).push(a)}
+    return m
+  },[acts,weekDates])
+
+  const workoutsByDow=useMemo(()=>{
+    const m={}
+    for(const w of gymverse){const di=weekDates.indexOf(w.workout_date||(w.started_at||'').slice(0,10));if(di>=0)(m[di]||(m[di]=[])).push(w)}
+    return m
+  },[gymverse,weekDates])
+
+  // Muscle group fatigue from past 7 days: {key → {lastDate, daysSince}}
+  const fatigue=useMemo(()=>{
+    const f={},now=Date.now()
+    for(const w of gymverse){
+      const ds=w.workout_date||(w.started_at||'').slice(0,10)
+      if(!ds) continue
+      const daysAgo=Math.floor((now-new Date(ds))/86400000)
+      if(daysAgo>7) continue
+      const upd=k=>{if(k&&(!f[k]||daysAgo<f[k].daysSince))f[k]={lastDate:ds,daysSince:daysAgo}}
+      for(const mg of(w.muscle_groups||[]))upd(mg.toLowerCase().replace(/s$/,''))
+      for(const ex of(w.exercises||[])){
+        if(!ex.name)continue
+        const g=classifyMuscleGroup(normaliseExerciseName(ex.name)).toLowerCase().replace(/s$/,'')
+        if(g!=='other')upd(g)
+      }
+    }
+    return f
+  },[gymverse])
+
+  const weekRunKm=useMemo(()=>+(acts
+    .filter(a=>['run','Run'].includes(a.type)&&weekDates.includes((a.started_at||'').slice(0,10)))
+    .reduce((s,a)=>s+(a.distance_m||0),0)/1000).toFixed(1),[acts,weekDates])
+
+  const weekRunGoal=(goals.find(g=>g.slug==='auto:run_week')?.target_value)||20
+  const latestHRV=useMemo(()=>[...metrics].sort((a,b)=>b.date>a.date?1:-1)[0]?.hrv||null,[metrics])
+
   return(
     <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:10}}>
       {DAYS_KEY.map((day,i)=>{
-        const item=plan.plan[day],isToday=i===todayDow,isPast=i<todayDow
-        const date=new Date(weekStart);date.setDate(date.getDate()+i)
+        const isToday=i===todayDow,isPast=i<todayDow,isFuture=i>todayDow
+        const dateNum=parseInt(weekDates[i]?.slice(8)||'0')
+        const dayActs=actsByDow[i]||[],dayWorkouts=workoutsByDow[i]||[]
+        const hasActual=dayActs.length>0||dayWorkouts.length>0
+        const raw=plan.plan[day],plannedItem=(!raw||raw.type==='rest')?null:raw
+
+        let item=plannedItem,isActual=false,adaptNote=null
+
+        if(isPast||isToday){
+          if(hasActual){
+            isActual=true
+            const pw=dayWorkouts[0]||null
+            const pa=[...dayActs].sort((a,b)=>(b.distance_m||0)-(a.distance_m||0))[0]||null
+            if(pw&&pa){
+              item={type:'strength',durationMins:Math.round(((pw.duration_secs||0)+(pa.duration_secs||0))/60),
+                notes:`${pw.workout_name||'Strength'} + ${(pa.distance_m/1000).toFixed(1)} km ${pa.type}`}
+            } else if(pw){
+              const mgs=(pw.muscle_groups||[]).slice(0,3).map(g=>g.charAt(0).toUpperCase()+g.slice(1))
+              item={type:'strength',durationMins:Math.round((pw.duration_secs||0)/60),
+                notes:(pw.workout_name||'Strength')+(mgs.length?' · '+mgs.join(', '):'')}
+            } else if(pa){
+              const dk=pa.distance_m>0?`${(pa.distance_m/1000).toFixed(1)} km`:null
+              item={type:(pa.type||'workout').toLowerCase(),durationMins:Math.round((pa.duration_secs||0)/60),
+                notes:dk?(dk+(pa.name?' · '+pa.name:'')):(pa.name||pa.type||'')}
+            }
+          }
+        }
+
+        if(isFuture&&plannedItem){
+          const pt=plannedItem.type
+          if(pt==='strength'){
+            const groups=['chest','back','leg','bicep','tricep','core','shoulder']
+            const recovering=groups.filter(g=>{const f=fatigue[g];return f&&f.daysSince<(MG_RECOVERY[g]||2)})
+            const fresh=groups.filter(g=>!fatigue[g]||fatigue[g].daysSince>=(MG_RECOVERY[g]||2))
+            const cap=g=>g.charAt(0).toUpperCase()+g.slice(1)
+            const fStr=fresh.slice(0,3).map(cap).join(', ')
+            const rStr=recovering.map(cap).join(', ')
+            if(fresh.length||recovering.length){
+              adaptNote=fStr?(rStr?`${fStr} · skip ${rStr}`:fStr):rStr?'All groups recovering':null
+              if(adaptNote)item={...plannedItem,notes:adaptNote}
+            }
+          } else if(pt==='run'||pt==='ride'){
+            const rem=+(weekRunGoal-weekRunKm).toFixed(1)
+            adaptNote=rem>0?`${rem} km left for weekly goal`:'Weekly goal met — easy run'
+            item={...plannedItem,notes:`${plannedItem.notes||''} · ${adaptNote}`.replace(/^\s*·\s*/,'')}
+          }
+          if(!adaptNote&&latestHRV&&latestHRV<45){
+            adaptNote=`HRV ${latestHRV} — prioritise recovery`
+            item={type:'walk',durationMins:30,notes:adaptNote}
+          }
+        }
+
         const color=item?(TC[item.type]||ORANGE):'rgba(255,255,255,0.2)'
+
         return(
-          <motion.div key={day} initial={{opacity:0,y:14,scale:isToday?0.92:0.96}} animate={{opacity:1,y:0,scale:isToday?1.04:1}}
+          <motion.div key={day}
+            initial={{opacity:0,y:14,scale:isToday?0.92:0.96}} animate={{opacity:1,y:0,scale:isToday?1.04:1}}
             transition={{type:'spring',stiffness:220,damping:22,delay:0.1+i*0.06}}
-            style={{background:isToday?`linear-gradient(180deg,${ORANGE}10,rgba(255,255,255,0.02) 60%)`:'rgba(255,255,255,0.02)',border:`1px solid ${isToday?ORANGE:'rgba(255,255,255,0.06)'}`,borderRadius:12,padding:'14px 12px',display:'flex',flexDirection:'column',gap:8,position:'relative',minHeight:160,boxShadow:isToday?`0 12px 36px -16px ${ORANGE}50`:undefined}}>
+            style={{background:isToday?`linear-gradient(180deg,${ORANGE}10,rgba(255,255,255,0.02) 60%)`:isActual?'rgba(255,255,255,0.035)':'rgba(255,255,255,0.02)',
+              border:`1px solid ${isToday?ORANGE:isActual?'rgba(255,255,255,0.1)':'rgba(255,255,255,0.06)'}`,
+              borderRadius:12,padding:'14px 12px',display:'flex',flexDirection:'column',gap:8,position:'relative',minHeight:160,
+              boxShadow:isToday?`0 12px 36px -16px ${ORANGE}50`:undefined}}>
             <span style={{position:'absolute',left:0,top:14,bottom:14,width:3,borderRadius:2,background:color}}/>
             <div style={{fontFamily:'var(--fd-mono)',fontSize:10,color:isToday?ORANGE:'var(--fd-ink3)',letterSpacing:'.14em',textTransform:'uppercase'}}>{DAYS_ABBR[i]}</div>
-            <div style={{fontFamily:'var(--fd-serif)',fontSize:22,letterSpacing:'-0.02em',lineHeight:1,color:'var(--fd-ink1)'}}>{date.getDate()}</div>
-            {isPast&&item&&(
-              <div style={{position:'absolute',top:12,right:12,width:18,height:18,borderRadius:'50%',background:'var(--good)',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                <svg width="11" height="11" viewBox="0 0 14 14">
-                  <motion.path d="M2.5 7.5 L5.5 10.5 L11.5 4" fill="none" stroke="#0e0c0a" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" initial={{pathLength:0}} animate={{pathLength:1}} transition={{duration:0.5,delay:0.6+i*0.06}}/>
-                </svg>
+            <div style={{fontFamily:'var(--fd-serif)',fontSize:22,letterSpacing:'-0.02em',lineHeight:1,color:'var(--fd-ink1)'}}>{dateNum}</div>
+
+            {isActual&&(
+              <div style={{position:'absolute',top:12,right:10,background:'var(--good)',borderRadius:5,padding:'2px 5px',
+                fontFamily:'var(--fd-mono)',fontSize:8,letterSpacing:'.1em',color:'#0e0c0a',textTransform:'uppercase',fontWeight:700}}>done</div>
+            )}
+            {isPast&&!isActual&&item&&(
+              <div style={{position:'absolute',top:12,right:12,width:16,height:16,borderRadius:'50%',
+                border:'1px solid rgba(255,255,255,0.15)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <svg width="8" height="8" viewBox="0 0 10 10"><path d="M2 2L8 8M8 2L2 8" stroke="rgba(255,255,255,0.25)" strokeWidth="1.8" strokeLinecap="round"/></svg>
               </div>
             )}
+            {isFuture&&adaptNote&&(
+              <div style={{position:'absolute',top:12,right:10,background:`${ORANGE}20`,border:`1px solid ${ORANGE}40`,
+                borderRadius:5,padding:'2px 5px',fontFamily:'var(--fd-mono)',fontSize:8,color:ORANGE,letterSpacing:'.1em',textTransform:'uppercase'}}>adapted</div>
+            )}
+
             {item?(
               <>
                 <div style={{marginTop:'auto'}}>
                   <span style={{color,fontFamily:'var(--fd-mono)',fontSize:10,letterSpacing:'.14em',textTransform:'uppercase'}}>{item.type}</span>
-                  <div style={{fontFamily:'var(--fd-mono)',fontSize:10.5,color:'var(--fd-ink3)',marginTop:2}}>{item.durationMins} min</div>
+                  {item.durationMins>0&&<div style={{fontFamily:'var(--fd-mono)',fontSize:10.5,color:'var(--fd-ink3)',marginTop:2}}>{item.durationMins} min</div>}
                 </div>
-                <div style={{fontSize:11,color:'var(--fd-ink3)',lineHeight:1.4}}>{item.notes}</div>
+                <div style={{fontSize:11,color:adaptNote&&isFuture?`${ORANGE}cc`:'var(--fd-ink3)',lineHeight:1.4}}>{item.notes}</div>
               </>
             ):(
               <div style={{marginTop:'auto',color:'var(--fd-ink3)',fontSize:13}}>Rest</div>
@@ -1288,8 +1565,26 @@ function Plan({plan}){
 }
 
 // ── Insight card ──────────────────────────────────────────────────────────────
-function InsightCard({ insight, workouts = [], exercisePRs = {}, bodyweightLbs }){
+function InsightCard({ insight, workouts = [], exercisePRs = {}, bodyweightLbs, acts = [], metrics = [], goals = [] }){
   const [tab, setTab] = useState('endurance')
+
+  // Live stats computed from actual data (always current regardless of AI insight age)
+  const liveStats = useMemo(() => {
+    const now = new Date()
+    const dow = now.getDay() === 0 ? 6 : now.getDay() - 1
+    const monThis = new Date(now); monThis.setDate(now.getDate() - dow); monThis.setHours(0,0,0,0)
+    const weekActs = acts.filter(a => new Date(a.started_at) >= monThis)
+    const weekKm = +(weekActs.reduce((s,a) => s + (a.distance_m||0), 0) / 1000).toFixed(1)
+    const weekSess = workouts.filter(w => new Date(w.workout_date||w.started_at) >= monThis).length
+    const latestM = [...metrics].sort((a,b) => b.date > a.date ? 1 : -1)[0]
+    const weekRunGoal = goals.find(g => g.slug === 'auto:run_week')?.target_value || 0
+    const insightAge = insight.week_start ? Math.floor((now - new Date(insight.week_start+'T00:00:00')) / 86400000) : null
+    return { weekKm, weekSess, weekRunGoal, latestHRV: latestM?.hrv, latestRHR: latestM?.resting_hr, insightAge }
+  }, [acts, workouts, metrics, goals, insight.week_start])
+
+  const insightDate = new Date(insight.week_start+'T00:00:00').toLocaleDateString('en',{month:'short',day:'numeric'})
+  const isStale = liveStats.insightAge !== null && liveStats.insightAge > 3
+
   return(
     <motion.div initial={{opacity:0,y:24}} animate={{opacity:1,y:0}} transition={{duration:0.6,ease:[0.2,0.7,0.2,1]}}
       style={{background:'linear-gradient(180deg,var(--fd-surface) 0%,#1a1714 100%)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:18,padding:22,height:'100%',overflowY:'auto',boxSizing:'border-box'}}>
@@ -1304,10 +1599,40 @@ function InsightCard({ insight, workouts = [], exercisePRs = {}, bodyweightLbs }
             </button>
           ))}
         </div>
-        <span style={{fontFamily:'var(--fd-mono)',fontSize:10,color:ORANGE}}>● {new Date(insight.week_start+'T00:00:00').toLocaleDateString('en',{month:'short',day:'numeric'})}</span>
+        <span style={{fontFamily:'var(--fd-mono)',fontSize:10,color:isStale?'rgba(255,255,255,0.3)':ORANGE}}>
+          {isStale?'AI · ':'● '}{insightDate}
+          {isStale&&<span style={{marginLeft:4,color:'rgba(255,255,255,0.2)'}}>· {liveStats.insightAge}d ago</span>}
+        </span>
       </div>
+
+      {/* Live stats strip — always current */}
+      {tab==='endurance'&&(
+        <div style={{display:'flex',gap:12,marginBottom:16,padding:'10px 12px',background:'rgba(255,255,255,0.03)',borderRadius:10,border:'1px solid rgba(255,255,255,0.06)'}}>
+          <div style={{flex:1,textAlign:'center'}}>
+            <div style={{fontFamily:'var(--fd-mono)',fontSize:8.5,color:'var(--fd-ink3)',letterSpacing:'.12em',textTransform:'uppercase',marginBottom:3}}>This week km</div>
+            <div style={{fontFamily:'var(--fd-serif)',fontSize:18,color:ORANGE,letterSpacing:'-0.02em'}}>{liveStats.weekKm}</div>
+          </div>
+          <div style={{width:1,background:'rgba(255,255,255,0.06)'}}/>
+          <div style={{flex:1,textAlign:'center'}}>
+            <div style={{fontFamily:'var(--fd-mono)',fontSize:8.5,color:'var(--fd-ink3)',letterSpacing:'.12em',textTransform:'uppercase',marginBottom:3}}>Gym sessions</div>
+            <div style={{fontFamily:'var(--fd-serif)',fontSize:18,color:'var(--fd-ink1)',letterSpacing:'-0.02em'}}>{liveStats.weekSess}</div>
+          </div>
+          {liveStats.latestHRV&&<><div style={{width:1,background:'rgba(255,255,255,0.06)'}}/>
+          <div style={{flex:1,textAlign:'center'}}>
+            <div style={{fontFamily:'var(--fd-mono)',fontSize:8.5,color:'var(--fd-ink3)',letterSpacing:'.12em',textTransform:'uppercase',marginBottom:3}}>HRV</div>
+            <div style={{fontFamily:'var(--fd-serif)',fontSize:18,color:'var(--good)',letterSpacing:'-0.02em'}}>{liveStats.latestHRV}</div>
+          </div></>}
+          {liveStats.latestRHR&&<><div style={{width:1,background:'rgba(255,255,255,0.06)'}}/>
+          <div style={{flex:1,textAlign:'center'}}>
+            <div style={{fontFamily:'var(--fd-mono)',fontSize:8.5,color:'var(--fd-ink3)',letterSpacing:'.12em',textTransform:'uppercase',marginBottom:3}}>Resting HR</div>
+            <div style={{fontFamily:'var(--fd-serif)',fontSize:18,color:'var(--warn)',letterSpacing:'-0.02em'}}>{liveStats.latestRHR}</div>
+          </div></>}
+        </div>
+      )}
+
       {tab==='endurance'&&(
         <>
+          {isStale&&<div style={{fontFamily:'var(--fd-mono)',fontSize:9,color:'rgba(255,255,255,0.25)',marginBottom:10,letterSpacing:'.08em'}}>AI analysis from {insightDate} — run the insight agent for updated notes</div>}
           <p style={{fontFamily:'var(--fd-serif)',fontSize:'clamp(16px,2.2vw,20px)',letterSpacing:'-0.015em',lineHeight:1.35,color:'var(--fd-ink1)',margin:'0 0 16px'}}>
             <em style={{color:ORANGE}}>{insight.summary}</em>
           </p>
@@ -1895,6 +2220,7 @@ function HealthTrends({daily}){
         <MiniSparkline data={d.map(x=>x.exercise_mins)} color="oklch(72% 0.16 200)" label="Exercise"     unit="min"    good="up"/>
         <MiniSparkline data={d.map(x=>x.stand_hours)}   color="oklch(70% 0.12 160)" label="Stand Hours"  unit="hrs"    good="up"/>
         <MiniSparkline data={d.map(x=>x.sleep_deep_hrs)}color="oklch(65% 0.14 235)" label="Deep Sleep"   unit="hrs"    dec={1} good="up"/>
+        {d.some(x=>x.weight_kg>0)&&<MiniSparkline data={d.map(x=>x.weight_kg||0)} color="oklch(72% 0.14 280)" label="Body Weight" unit="kg" dec={1} good="down"/>}
         <SleepStages daily={d}/>
       </div>
     </div>
@@ -2179,7 +2505,16 @@ function LiftLog({ workouts, exercisePRs = {} }) {
                     const exKey   = `${w.id||w.external_id}::${ex.name}`
                     const exOpen  = openEx === exKey
                     const prRow   = exercisePRs[ex.name]
-                    const history = exerciseHistory[ex.name] || []
+                    // Prefer DB all-time history; supplement with workouts-computed history for any missing dates
+                    const dbHist  = (prRow?.history || []).filter(h => h.date && (h.top_weight_lbs || h.e1rm_lbs))
+                    const wkHist  = exerciseHistory[ex.name] || []
+                    const history = dbHist.length > 0
+                      ? (() => {
+                          const seen  = new Set(dbHist.map(h => h.date))
+                          const extra = wkHist.filter(h => h.date && !seen.has(h.date))
+                          return [...dbHist, ...extra].sort((a,b) => (a.date||'') < (b.date||'') ? -1 : 1)
+                        })()
+                      : wkHist
                     // PR: actual best weight set ever (not estimated 1RM)
                     const isPR    = prRow && ex.top_set_weight_lbs && ex.top_set_weight_lbs >= (prRow.best_weight_lbs||0)
                     // Chart uses actual top weight lifted per session
@@ -2442,6 +2777,10 @@ function ExerciseLineChart({ points, color = ORANGE, prIdx = -1, floor = 0, yFmt
 function computeStrengthPercentile(exerciseName, weightLbs, bwLbs = 185) {
   const n = exerciseName.toLowerCase()
 
+  // ── Exclude exercises where BW-ratio standards are meaningless ───────────────
+  // Cable/machine fly, pec deck, reverse fly — stack weight ≠ free-weight load
+  if (/(cable.*fly|fly.*machine|pec.?deck|pec.*fly|chest.*fly|reverse.*fly|rear.*fly|dumbbell.*fly(?:e)?$)/.test(n)) return null
+
   // ── canonical detection ──────────────────────────────────────────────────
   let canon = null, approx = false
   if      (/(barbell bench press|dumbbell bench press|incline.*press|decline.*press|chest press)/.test(n) && !/machine/.test(n)) canon = 'bench'
@@ -2452,8 +2791,8 @@ function computeStrengthPercentile(exerciseName, weightLbs, bwLbs = 185) {
   else if (/lat pull.?down|pulldown/.test(n))                  { canon = 'pulldown'; approx = true }
   else if (/(bent.over row|barbell row|cable row|seated.*row|chest.*supported.*row)/.test(n))  { canon = 'row'; approx = true }
   else if (/(pull.?up|chin.?up)/.test(n))                      { canon = 'pullup';   approx = true }
-  else if (/(curl|pushdown|extension|raise|fly|kickback|pullover|hip thrust|dip|press machine|fly machine)/.test(n)) { canon = 'isolation'; approx = true }
-  else if (/(machine|selector|plate loaded|cable)/.test(n))    { canon = 'machine';  approx = true }
+  else if (/(curl|pushdown|extension|raise|kickback|pullover|hip thrust|dip|press machine)/.test(n)) { canon = 'isolation'; approx = true }
+  else if (/(machine|selector|plate loaded)/.test(n))          { canon = 'machine';  approx = true }
 
   if (!canon) return null
 
@@ -2501,13 +2840,25 @@ function computeStrengthPercentile(exerciseName, weightLbs, bwLbs = 185) {
 function ExerciseCard({ name, hist, prRow, bodyweightLbs, animDelay = 0 }) {
   const [open, setOpen] = useState(false)
 
-  const hasWeight   = hist.some(h => h.top_weight_lbs)
-  const bestW = prRow?.best_weight_lbs ?? (hasWeight ? Math.max(...hist.map(h => h.top_weight_lbs||0)) : null)
-  const bestR = prRow?.best_reps ?? (hist.reduce((mx, h) => Math.max(mx, h.top_reps||0), 0) || null)
-  const first = hist[0]
+  // ── Merge sources for richer history ─────────────────────────────────────────
+  // prRow.history = DB-backed all-time cache (up to 20 pts) from gymverse_exercise_prs
+  // hist          = computed from the last 30 fetched workouts (may miss older sessions)
+  // Union: DB history wins; workout-hist adds any date not yet in the DB cache
+  const mergedHist = useMemo(() => {
+    const dbHist = (prRow?.history || []).filter(h => h.date && (h.top_weight_lbs || h.top_reps || h.e1rm_lbs || h.volume_lbs))
+    if (dbHist.length === 0) return hist
+    const seen  = new Set(dbHist.map(h => h.date))
+    const extra = hist.filter(h => h.date && !seen.has(h.date))
+    return [...dbHist, ...extra].sort((a, b) => (a.date || '') < (b.date || '') ? -1 : 1)
+  }, [prRow?.history, hist])
 
-  const trendPct = hasWeight && hist.length > 1 && first.top_weight_lbs
-    ? Math.round(((hist.at(-1).top_weight_lbs - first.top_weight_lbs) / first.top_weight_lbs) * 100)
+  const hasWeight   = mergedHist.some(h => h.top_weight_lbs)
+  const bestW = prRow?.best_weight_lbs ?? (hasWeight ? Math.max(...mergedHist.map(h => h.top_weight_lbs||0)) : null)
+  const bestR = prRow?.best_reps ?? (mergedHist.reduce((mx, h) => Math.max(mx, h.top_reps||0), 0) || null)
+  const first = mergedHist[0]
+
+  const trendPct = hasWeight && mergedHist.length > 1 && first?.top_weight_lbs
+    ? Math.round(((mergedHist.at(-1).top_weight_lbs - first.top_weight_lbs) / first.top_weight_lbs) * 100)
     : null
 
   const pctInfo = bestW ? computeStrengthPercentile(name, bestW, bodyweightLbs || 185) : null
@@ -2520,12 +2871,12 @@ function ExerciseCard({ name, hist, prRow, bodyweightLbs, animDelay = 0 }) {
     : 'rgba(255,255,255,0.3)'
 
   // Chart: prefer weight axis; fall back to reps for bodyweight exercises
-  const points = hist.map(h => ({
+  const points = mergedHist.map(h => ({
     label:      h.date,
     shortLabel: h.date?.slice(5),
     value:      h.top_weight_lbs ?? 0,
   }))
-  const repsPoints = hist.map(h => ({
+  const repsPoints = mergedHist.map(h => ({
     label:      h.date,
     shortLabel: h.date?.slice(5),
     value:      h.top_reps ?? 0,
@@ -2607,7 +2958,7 @@ function ExerciseCard({ name, hist, prRow, bodyweightLbs, animDelay = 0 }) {
           </div>
         ) : (
           <div style={{ fontFamily:'var(--fd-mono)', fontSize:9, color:'rgba(255,255,255,0.2)', display:'flex', gap:8, alignItems:'center' }}>
-            <span>{hist.length} session{hist.length !== 1 ? 's' : ''}</span>
+            <span>{mergedHist.length} session{mergedHist.length !== 1 ? 's' : ''}</span>
             {trendPct !== null && (
               <span style={{ color: trendPct >= 0 ? 'var(--good)' : 'var(--bad)' }}>
                 {trendPct >= 0 ? '+' : ''}{trendPct}%
@@ -2628,7 +2979,7 @@ function ExerciseCard({ name, hist, prRow, bodyweightLbs, animDelay = 0 }) {
             style={{ overflow:'hidden' }}>
             <div style={{ borderTop:'1px solid rgba(255,255,255,0.07)', padding:'12px 16px 14px' }}>
               <div style={{ fontFamily:'var(--fd-mono)', fontSize:9, color:'var(--fd-ink3)', letterSpacing:'.12em', textTransform:'uppercase', marginBottom:8 }}>
-                Progress — {hist.length} session{hist.length !== 1 ? 's' : ''}
+                Progress — {mergedHist.length} session{mergedHist.length !== 1 ? 's' : ''}
                 {trendPct !== null && (
                   <span style={{ color: trendPct >= 0 ? 'var(--good)' : 'var(--bad)', marginLeft:8, letterSpacing:0 }}>
                     {trendPct >= 0 ? '+' : ''}{trendPct}% overall
@@ -2671,20 +3022,48 @@ function classifyMuscleGroup(name) {
 }
 
 // ── Exercise progress grid (always-visible per-lift history) ─────────────────
+// ── Exercise name normaliser (mirrors strava-lift-scraper.js) ────────────────
+// Ensures the same exercise scraped with different capitalisation / punctuation
+// merges into a single history entry.
+function normaliseExerciseName(raw) {
+  if (!raw) return raw
+  return raw.trim()
+    .replace(/\b\w+\b/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .replace(/\bEz\b/g,  'EZ').replace(/\bOhp\b/g, 'OHP').replace(/\bRdl\b/g, 'RDL')
+    .replace(/T-bar\b/gi, 'T-Bar')
+    .replace(/EZ[-–]\s*Bar\b/gi, 'EZ Bar')
+    .replace(/\bTriceps\b/g, 'Tricep')
+    .replace(/,\s*(Overhand|Underhand|Neutral|Pronated|Supinated|Wide|Narrow|Close|Standard)\s*Grip$/i, '')
+    .trim()
+}
+
 function ExerciseProgressGrid({ workouts, exercisePRs = {}, bodyweightLbs }) {
   const history = useMemo(() => {
     const h = {}
     for (const w of [...workouts].sort((a,b) => (a.workout_date||a.started_at) < (b.workout_date||b.started_at) ? -1 : 1)) {
       for (const ex of (w.exercises||[])) {
-        // Include every exercise that has a real name (even if weight is unknown)
-        if (!ex.name || ex.name.toLowerCase().startsWith('unknown')) continue
-        if (!h[ex.name]) h[ex.name] = []
-        h[ex.name].push({
+        // Skip unknown / empty names
+        if (!ex.name || /^unknown\b/i.test(ex.name.trim())) continue
+        const name = normaliseExerciseName(ex.name)
+        if (!h[name]) h[name] = []
+        h[name].push({
           date:           w.workout_date || w.started_at?.slice(0,10),
           top_weight_lbs: ex.top_set_weight_lbs || null,
           top_reps:       ex.top_set_reps || null,
+          e1rm_lbs:       ex.e1rm_lbs || null,
+          volume_lbs:     ex.volume_lbs || null,
         })
       }
+    }
+    // Deduplicate per exercise per date — keep entry with most data (prefer weight > reps > e1rm)
+    for (const name of Object.keys(h)) {
+      const byDate = new Map()
+      for (const entry of h[name]) {
+        const existing = byDate.get(entry.date)
+        const score = e => (e.top_weight_lbs||0)*100 + (e.top_reps||0)*10 + (e.e1rm_lbs||0) + (e.volume_lbs||0)/1000
+        if (!existing || score(entry) > score(existing)) byDate.set(entry.date, entry)
+      }
+      h[name] = [...byDate.values()].sort((a,b) => (a.date||'') < (b.date||'') ? -1 : 1)
     }
     return h
   }, [workouts])
@@ -2797,6 +3176,230 @@ function ExerciseProgressGrid({ workouts, exercisePRs = {}, bodyweightLbs }) {
 }
 
 // ── Run pace trend (GymVerse-style line chart) ────────────────────────────────
+// ── Fitness & Freshness line chart (CTL · ATL · Form) ────────────────────────
+function FitnessFreshnessChart({trend}){
+  const ref=useRef(null);const[w,setW]=useState(560)
+  useEffect(()=>{if(!ref.current)return;const ro=new ResizeObserver(([e])=>setW(Math.max(280,e.contentRect.width)));ro.observe(ref.current);return()=>ro.disconnect()},[])
+  const[hover,setHover]=useState(null)
+  if(!trend.length) return <div style={{height:180,display:'flex',alignItems:'center',justifyContent:'center',color:'var(--fd-ink3)',fontFamily:'var(--fd-mono)',fontSize:11}}>No activity data yet</div>
+
+  const h=180,pL=32,pR=12,pT=12,pB=20,iW=w-pL-pR,iH=h-pT-pB
+  const vMax=Math.ceil(Math.max(...trend.map(d=>d.ctl),...trend.map(d=>d.atl),15)/10)*10+5
+  const xAt=i=>pL+(i/(trend.length-1||1))*iW
+  const yAt=v=>pT+iH-Math.max(0,Math.min(iH,(v/vMax)*iH))
+  const ctlPath=trend.map((d,i)=>`${i===0?'M':'L'} ${xAt(i).toFixed(1)} ${yAt(d.ctl).toFixed(1)}`).join(' ')
+  const atlPath=trend.map((d,i)=>`${i===0?'M':'L'} ${xAt(i).toFixed(1)} ${yAt(d.atl).toFixed(1)}`).join(' ')
+  const ctlFill=ctlPath+` L ${xAt(trend.length-1)} ${pT+iH} L ${xAt(0)} ${pT+iH} Z`
+
+  // Month tick marks for X-axis
+  const mTicks=trend.reduce((acc,d,i)=>{
+    if(i===0||(i>0&&d.date.slice(5,7)!==trend[i-1].date.slice(5,7)))
+      acc.push({i,label:new Date(d.date+'T12:00').toLocaleDateString('en',{month:'short'})})
+    return acc
+  },[])
+
+  const cur=trend[trend.length-1]
+  const formStatus=cur.form>25?'Transition':cur.form>5?'Fresh':cur.form>-10?'Neutral':cur.form>-30?'Building':'Overreaching'
+  const formColor=cur.form>5?'var(--good)':cur.form>-10?'rgba(255,255,255,0.5)':cur.form>-30?ORANGE:'var(--bad)'
+  const BLUE='oklch(65% 0.14 250)'
+
+  return(
+    <div>
+      {/* Stat pills */}
+      <div style={{display:'flex',gap:8,marginBottom:14}}>
+        {[
+          {label:'Fitness (CTL)', val:cur.ctl.toFixed(0),  color:BLUE,  sub:'42-day load'},
+          {label:'Fatigue (ATL)', val:cur.atl.toFixed(0),  color:ORANGE,sub:'7-day load'},
+          {label:'Form (TSB)',    val:(cur.form>=0?'+':'')+cur.form.toFixed(0), color:formColor, sub:formStatus},
+        ].map((s,i)=>(
+          <div key={i} style={{flex:1,background:'rgba(255,255,255,0.03)',border:`1px solid ${s.color}2a`,borderRadius:10,padding:'10px 14px'}}>
+            <div style={{fontFamily:'var(--fd-mono)',fontSize:9,color:'var(--fd-ink3)',letterSpacing:'.12em',textTransform:'uppercase',marginBottom:4}}>{s.label}</div>
+            <div style={{display:'flex',alignItems:'baseline',gap:5}}>
+              <span style={{fontFamily:'var(--fd-serif)',fontSize:28,color:s.color,lineHeight:1,letterSpacing:'-0.02em'}}>{s.val}</span>
+              <span style={{fontFamily:'var(--fd-mono)',fontSize:9,color:s.color,opacity:0.75,letterSpacing:'.06em'}}>{s.sub.toUpperCase()}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Chart */}
+      <div ref={ref} style={{position:'relative',cursor:'crosshair'}} onMouseLeave={()=>setHover(null)}
+        onMouseMove={e=>{const r=ref.current?.getBoundingClientRect();if(!r)return;const sx=(e.clientX-r.left)/r.width*w;let best=0,bd=Infinity;trend.forEach((_,i)=>{const dx=Math.abs(xAt(i)-sx);if(dx<bd){bd=dx;best=i}});setHover(best)}}>
+        <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{display:'block',width:'100%',height:'auto',overflow:'visible'}}>
+          <defs>
+            <linearGradient id="ff-ctl-g" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor={BLUE} stopOpacity="0.18"/>
+              <stop offset="100%" stopColor={BLUE} stopOpacity="0"/>
+            </linearGradient>
+          </defs>
+          {[0,0.33,0.67,1].map(t=><line key={t} x1={pL} x2={w-pR} y1={pT+t*iH} y2={pT+t*iH} stroke="rgba(255,255,255,0.05)" strokeDasharray={t===0||t===1?'':'2 4'}/>)}
+          {[0,Math.round(vMax/2),vMax].map((v,i)=><text key={i} x={pL-4} y={yAt(v)+3} textAnchor="end" fontFamily="var(--fd-mono)" fontSize="9" fill="rgba(255,255,255,0.22)">{v}</text>)}
+          {mTicks.map(({i,label})=><text key={i} x={xAt(i)} y={h-2} textAnchor="middle" fontFamily="var(--fd-mono)" fontSize="8.5" fill="rgba(255,255,255,0.2)">{label}</text>)}
+          <path d={ctlFill} fill="url(#ff-ctl-g)"/>
+          <motion.path d={ctlPath} fill="none" stroke={BLUE} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" initial={{pathLength:0}} animate={{pathLength:1}} transition={{duration:2,ease:[0.2,0.7,0.2,1]}}/>
+          <motion.path d={atlPath} fill="none" stroke={ORANGE} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="4 2" initial={{pathLength:0}} animate={{pathLength:1}} transition={{duration:2,delay:0.3,ease:[0.2,0.7,0.2,1]}}/>
+          {hover!=null&&<g>
+            <line x1={xAt(hover)} x2={xAt(hover)} y1={pT} y2={pT+iH} stroke="rgba(255,255,255,0.15)" strokeDasharray="2 3"/>
+            <circle cx={xAt(hover)} cy={yAt(trend[hover].ctl)} r="3.5" fill="#161412" stroke={BLUE} strokeWidth="1.8"/>
+            <circle cx={xAt(hover)} cy={yAt(trend[hover].atl)} r="3.5" fill="#161412" stroke={ORANGE} strokeWidth="1.8"/>
+          </g>}
+        </svg>
+        {hover!=null&&trend[hover]&&(
+          <div style={{position:'absolute',background:'#0e0c0a',border:'1px solid rgba(255,255,255,0.1)',padding:'9px 12px',borderRadius:8,fontFamily:'var(--fd-mono)',fontSize:10,pointerEvents:'none',zIndex:10,top:8,left:`${Math.min(Math.max((xAt(hover)/w)*100,10),80)}%`,transform:'translate(-50%,0)',whiteSpace:'nowrap'}}>
+            <div style={{color:'var(--fd-ink3)',fontSize:9,marginBottom:5}}>{new Date(trend[hover].date+'T12:00').toLocaleDateString('en',{month:'short',day:'numeric'})}</div>
+            <div style={{color:BLUE,marginBottom:2}}>Fitness {trend[hover].ctl.toFixed(1)}</div>
+            <div style={{color:ORANGE,marginBottom:2}}>Fatigue {trend[hover].atl.toFixed(1)}</div>
+            <div style={{color:trend[hover].form>5?'var(--good)':trend[hover].form>-10?'rgba(255,255,255,0.5)':ORANGE}}>Form {trend[hover].form>=0?'+':''}{trend[hover].form.toFixed(1)}</div>
+          </div>
+        )}
+      </div>
+      <div style={{display:'flex',gap:16,marginTop:6,fontFamily:'var(--fd-mono)',fontSize:9,color:'rgba(255,255,255,0.25)'}}>
+        <span><span style={{display:'inline-block',width:18,height:2,background:'oklch(65% 0.14 250)',verticalAlign:'middle',borderRadius:1,marginRight:5}}/>Fitness (CTL)</span>
+        <span><span style={{display:'inline-block',width:18,height:0,borderTop:`1.5px dashed ${ORANGE}`,verticalAlign:'middle',marginRight:5}}/>Fatigue (ATL)</span>
+        <span style={{marginLeft:'auto'}}>TRIMP · 90-day window</span>
+      </div>
+    </div>
+  )
+}
+
+// ── HR Zone horizontal bars ───────────────────────────────────────────────────
+function HRZoneBars({zones}){
+  const total=Math.max(zones.reduce((s,z)=>s+z.mins,0),1)
+  const hasData=zones.some(z=>z.mins>0)
+  if(!hasData) return <div style={{height:120,display:'flex',alignItems:'center',justifyContent:'center',color:'var(--fd-ink3)',fontFamily:'var(--fd-mono)',fontSize:11,textAlign:'center',lineHeight:1.6}}>No HR data<br/>on recorded activities</div>
+  return(
+    <div style={{display:'flex',flexDirection:'column',gap:10}}>
+      {zones.map((z,i)=>{
+        const pct=z.mins/total
+        const hrs=Math.floor(z.mins/60), mins=z.mins%60
+        return(
+          <div key={z.z}>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+              <span style={{fontFamily:'var(--fd-mono)',fontSize:9,color:z.color,letterSpacing:'.08em',width:22,flexShrink:0}}>{z.z}</span>
+              <span style={{fontFamily:'var(--fd-mono)',fontSize:9,color:'var(--fd-ink2)',flex:1}}>{z.label}</span>
+              <span style={{fontFamily:'var(--fd-mono)',fontSize:9,color:'var(--fd-ink3)',flexShrink:0}}>{hrs>0?`${hrs}h `:''}{ mins}m</span>
+              <span style={{fontFamily:'var(--fd-mono)',fontSize:9,color:'rgba(255,255,255,0.2)',width:30,textAlign:'right',flexShrink:0}}>{(pct*100).toFixed(0)}%</span>
+            </div>
+            <div style={{height:5,background:'rgba(255,255,255,0.05)',borderRadius:3,overflow:'hidden'}}>
+              <motion.div initial={{scaleX:0}} animate={{scaleX:1}} transition={{delay:i*0.07+0.2,duration:0.5,ease:[0.2,0.7,0.2,1]}} style={{height:'100%',width:`${pct*100}%`,background:z.color,borderRadius:3,transformOrigin:'left'}}/>
+            </div>
+          </div>
+        )
+      })}
+      <div style={{fontFamily:'var(--fd-mono)',fontSize:9,color:'rgba(255,255,255,0.18)',marginTop:2,textAlign:'right'}}>
+        {Math.floor(total/60)}h {total%60}m tracked · est. max HR 185 bpm
+      </div>
+    </div>
+  )
+}
+
+// ── Weekly relative effort bar chart ─────────────────────────────────────────
+function WeeklyLoadBars({weeks}){
+  const ref=useRef(null);const[w,setW]=useState(520)
+  useEffect(()=>{if(!ref.current)return;const ro=new ResizeObserver(([e])=>setW(Math.max(200,e.contentRect.width)));ro.observe(ref.current);return()=>ro.disconnect()},[])
+  const[hover,setHover]=useState(null)
+  const maxLoad=Math.max(...weeks.map(d=>d.load),1)
+  const h=130,pL=0,pR=0,pT=8,pB=22,iW=w,iH=h-pT-pB
+  const gap=Math.max(2,iW*0.012), bw=(iW-gap*weeks.length)/weeks.length
+  const avg=Math.round(weeks.slice(0,-1).reduce((s,d)=>s+d.load,0)/Math.max(weeks.length-1,1))
+  const avgY=pT+iH-(avg/maxLoad)*iH
+
+  return(
+    <div ref={ref} style={{position:'relative',cursor:'crosshair'}} onMouseLeave={()=>setHover(null)}>
+      <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{display:'block',width:'100%',overflow:'visible'}}>
+        <line x1={0} x2={w} y1={avgY} y2={avgY} stroke="rgba(255,255,255,0.1)" strokeDasharray="3 5"/>
+        <text x={w-2} y={avgY-3} textAnchor="end" fontFamily="var(--fd-mono)" fontSize="8" fill="rgba(255,255,255,0.22)">avg {avg}</text>
+        {weeks.map((d,i)=>{
+          const x=i*(bw+gap), bh=Math.max(2,(d.load/maxLoad)*iH), y=pT+iH-bh
+          const isH=hover===i
+          return(
+            <g key={i} onMouseEnter={()=>setHover(i)} style={{cursor:'pointer'}}>
+              <rect x={x} y={pT} width={bw} height={iH} fill="transparent"/>
+              <motion.g style={{transformOrigin:`${x+bw/2}px ${pT+iH}px`,transformBox:'view-box'}}
+                initial={{scaleY:0}} animate={{scaleY:1}} transition={{duration:0.5,delay:i*0.035,ease:[0.2,0.7,0.2,1]}}>
+                <rect x={x} y={y} width={bw} height={bh} rx="2"
+                  fill={d.isCurrent?ORANGE:isH?'rgba(255,255,255,0.3)':'rgba(255,255,255,0.12)'}/>
+              </motion.g>
+              {(i%4===0||i===weeks.length-1)&&(
+                <text x={x+bw/2} y={h-2} textAnchor="middle" fontFamily="var(--fd-mono)" fontSize="8" fill="rgba(255,255,255,0.2)">{d.label}</text>
+              )}
+            </g>
+          )
+        })}
+      </svg>
+      {hover!=null&&weeks[hover]&&(
+        <div style={{position:'absolute',bottom:'100%',left:`${((hover+0.5)/weeks.length)*100}%`,transform:'translate(-50%,-4px)',background:'#0e0c0a',border:'1px solid rgba(255,255,255,0.1)',padding:'8px 11px',borderRadius:7,fontFamily:'var(--fd-mono)',fontSize:10,pointerEvents:'none',zIndex:10,whiteSpace:'nowrap'}}>
+          <div style={{color:'var(--fd-ink3)',fontSize:9,marginBottom:3}}>{weeks[hover].label}{weeks[hover].isCurrent?' · current week':''}</div>
+          <div style={{color:ORANGE}}>Load {weeks[hover].load}</div>
+          <div style={{color:'var(--fd-ink3)'}}>{weeks[hover].count} {weeks[hover].count===1?'activity':'activities'}</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Year-over-year comparison card ────────────────────────────────────────────
+function YearOverYearCard({yoy}){
+  const rows=[
+    {label:'Distance',  cyV:yoy.cy.km,     pyV:yoy.py.km,     unit:'km'},
+    {label:'Activities',cyV:yoy.cy.count,   pyV:yoy.py.count,  unit:''},
+    {label:'Move time', cyV:yoy.cy.hrs,     pyV:yoy.py.hrs,    unit:'h'},
+    {label:'Elevation', cyV:yoy.cy.elevM,   pyV:yoy.py.elevM,  unit:'m'},
+  ]
+  return(
+    <div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',fontFamily:'var(--fd-mono)',fontSize:9,color:'var(--fd-ink3)',letterSpacing:'.1em',textTransform:'uppercase',marginBottom:10,paddingBottom:6,borderBottom:'1px solid rgba(255,255,255,0.06)'}}>
+        <span>Metric</span>
+        <span style={{textAlign:'right',color:ORANGE}}>{yoy.year}</span>
+        <span style={{textAlign:'right'}}>{yoy.year-1}</span>
+      </div>
+      {rows.map((r,i)=>{
+        const delta=r.cyV-r.pyV
+        const pct=r.pyV>0?Math.round((delta/r.pyV)*100):null
+        const up=delta>0
+        return(
+          <motion.div key={r.label} initial={{opacity:0,x:8}} animate={{opacity:1,x:0}} transition={{delay:i*0.07,duration:0.4}}
+            style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',alignItems:'center',marginBottom:14}}>
+            <span style={{fontFamily:'var(--fd-mono)',fontSize:10,color:'var(--fd-ink2)'}}>{r.label}</span>
+            <div style={{textAlign:'right'}}>
+              <span style={{fontFamily:'var(--fd-serif)',fontSize:22,color:ORANGE,letterSpacing:'-0.02em'}}>{r.cyV.toLocaleString()}</span>
+              <span style={{fontFamily:'var(--fd-mono)',fontSize:8,color:'var(--fd-ink3)',marginLeft:2}}>{r.unit}</span>
+              {pct!=null&&<div style={{fontFamily:'var(--fd-mono)',fontSize:8.5,color:up?'var(--good)':'var(--bad)',marginTop:1}}>{up?'↑':'↓'}{Math.abs(pct)}%</div>}
+            </div>
+            <div style={{textAlign:'right'}}>
+              <span style={{fontFamily:'var(--fd-serif)',fontSize:18,color:'var(--fd-ink3)',letterSpacing:'-0.02em'}}>{r.pyV.toLocaleString()}</span>
+              <span style={{fontFamily:'var(--fd-mono)',fontSize:8,color:'rgba(255,255,255,0.2)',marginLeft:2}}>{r.unit}</span>
+            </div>
+          </motion.div>
+        )
+      })}
+      <div style={{fontFamily:'var(--fd-mono)',fontSize:9,color:'rgba(255,255,255,0.18)',marginTop:2}}>Jan 1 → today, each year</div>
+    </div>
+  )
+}
+
+// ── Best efforts / race predictor row ─────────────────────────────────────────
+function BestEffortsRow({efforts}){
+  const fmtTime=secs=>{if(!secs)return'—';const h=Math.floor(secs/3600),m=Math.floor((secs%3600)/60),s=secs%60;return h>0?`${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${m}:${String(s).padStart(2,'0')}`}
+  const pacePerKm=e=>e.secs?Math.round(e.secs/(e.m/1000)):null
+  const fmtPace=spm=>{if(!spm)return'';const m=Math.floor(spm/60),s=spm%60;return`${m}:${String(s).padStart(2,'0')}/km`}
+  return(
+    <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:10}}>
+      {efforts.map((e,i)=>(
+        <motion.div key={e.name} initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} transition={{delay:i*0.06,duration:0.4}}
+          style={{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.07)',borderRadius:12,padding:'14px 12px',textAlign:'center'}}>
+          <div style={{fontFamily:'var(--fd-mono)',fontSize:9,color:'var(--fd-ink3)',letterSpacing:'.1em',textTransform:'uppercase',marginBottom:6}}>{e.name}</div>
+          <div style={{fontFamily:'var(--fd-serif)',fontSize:e.secs?20:18,color:e.secs?TC.run:'rgba(255,255,255,0.25)',letterSpacing:'-0.02em',lineHeight:1.1,marginBottom:4}}>{fmtTime(e.secs)}</div>
+          {e.secs&&<div style={{fontFamily:'var(--fd-mono)',fontSize:8,color:'var(--fd-ink3)'}}>{fmtPace(pacePerKm(e))}</div>}
+          <div style={{fontFamily:'var(--fd-mono)',fontSize:8,color:'rgba(255,255,255,0.18)',marginTop:3}}>
+            {e.estimated?'projected':e.date?new Date(e.date+'T12:00').toLocaleDateString('en',{month:'short',day:'numeric',year:'2-digit'}):'no data'}
+          </div>
+        </motion.div>
+      ))}
+    </div>
+  )
+}
+
 function RunPaceTrendChart({ acts }) {
   const runs = useMemo(() =>
     acts
@@ -2902,7 +3505,6 @@ function StreakBadge({streak}){
 // ── Main export ───────────────────────────────────────────────────────────────
 export default function FitnessDashboard(){
   const{data,loading}=useDashboardData()
-  const[tab,setTab]=useState('run')
 
   const wk         =useMemo(()=>data?thisWeekStats(data.acts,data.metrics):null,[data])
   const weeklyData =useMemo(()=>data?weeklyTotals(data.acts,8):[],[data])
@@ -2916,22 +3518,13 @@ export default function FitnessDashboard(){
     return s
   },[streak.days])
   const[recovDur,setRecovDur]=useState('1m')
-  const[wkDur,setWkDur]=useState('1m')
   const recovData  =useMemo(()=>sliceByDuration(data?.metrics??[],recovDur),[data,recovDur])
-  const weeklyBarsData=useMemo(()=>{
-    if(!data)return[]
-    const n=wkDur==='7d'?1:wkDur==='1m'?4:wkDur==='6m'?26:52
-    return weeklyTotals(data.acts,n)
-  },[data,wkDur])
-  const counts     =useMemo(()=>{
-    if(!wk)return{}
-    const c={all:wk.weekActivities.length}
-    wk.weekActivities.forEach(a=>c[a.type]=(c[a.type]||0)+1)
-    return c
-  },[wk])
   const totalKm    =useMemo(()=>data?+(data.acts.reduce((s,a)=>s+(a.distance_m||0),0)/1000).toFixed(0):0,[data])
-
-  useEffect(()=>{if(wk?.mostFreqType)setTab(wk.mostFreqType)},[wk?.mostFreqType])
+  const fitTrend   =useMemo(()=>data?computeFitnessTrend(data.acts,data.metrics,90):[], [data])
+  const hrZones    =useMemo(()=>data?computeHRZones(data.acts):HR_ZONE_DEF.map(z=>({...z,mins:0})), [data])
+  const weeklyLoad =useMemo(()=>data?computeWeeklyLoad(data.acts,data.metrics,16):[], [data])
+  const yoyData    =useMemo(()=>data?computeYearOverYear(data.acts):null, [data])
+  const bestEfforts=useMemo(()=>data?computeBestEfforts(data.acts):RACE_DISTS.map(d=>({...d,secs:null})), [data])
 
   const recoveryColors={recovered:'var(--good)',moderate:'var(--warn)',fatigued:'var(--bad)',unknown:'var(--fd-ink3)'}
   const recoveryLabels={recovered:'Recovered',moderate:'Moderate load',fatigued:'Fatigued',unknown:'—'}
@@ -2987,28 +3580,9 @@ export default function FitnessDashboard(){
           </div>
         </div>
 
-        {/* ── 02 Activity focus ── */}
+        {/* ── 02 Routes map ── */}
         <div style={{marginTop:48}}>
-          <SectionHead num="02" label="By type" title={<>Activity <em style={{color:'rgba(255,255,255,0.45)'}}>focus.</em></>}/>
-          <div style={{marginBottom:14}}><SportTabs value={tab} onChange={setTab} counts={counts}/></div>
-          <div style={{display:'grid',gap:14,gridTemplateColumns:'5fr 7fr'}}>
-            <FocusStage tab={tab} weekActs={wk?.weekActivities??[]}/>
-            <div style={{background:'var(--fd-surface)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:16,padding:20,minHeight:360,backdropFilter:'blur(12px)'}}>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',fontFamily:'"JetBrains Mono",monospace',fontSize:10.5,color:'rgba(255,255,255,0.35)',letterSpacing:'.16em',textTransform:'uppercase',marginBottom:16}}>
-                <span>Weekly distance</span>
-                <div style={{display:'flex',alignItems:'center',gap:12}}>
-                  <span style={{color:ORANGE}}>● this week</span>
-                  <DurationPill value={wkDur} onChange={setWkDur}/>
-                </div>
-              </div>
-              <WeeklyBars data={weeklyBarsData}/>
-            </div>
-          </div>
-        </div>
-
-        {/* ── 03 Routes map ── */}
-        <div style={{marginTop:48}}>
-          <SectionHead num="03" label="GPS routes" title={<>Route <em style={{color:'rgba(255,255,255,0.45)'}}>map.</em></>}
+          <SectionHead num="02" label="GPS routes" title={<>Route <em style={{color:'rgba(255,255,255,0.45)'}}>map.</em></>}
             right={data.routes.length?<><b style={{color:'#f7f5f1'}}>{data.routes.length}</b> mapped routes</>:'No routes yet'}/>
           {data.routes.length>0
             ? <RouteMap routes={data.routes}/>
@@ -3020,12 +3594,84 @@ export default function FitnessDashboard(){
 
         {/* ── 04 Heat map ── */}
         <div style={{marginTop:48}}>
-          <SectionHead num="04" label="Consistency" title={<>Heat <em style={{color:'rgba(255,255,255,0.45)'}}>map.</em></>}
+          <SectionHead num="03" label="Consistency" title={<>Heat <em style={{color:'rgba(255,255,255,0.45)'}}>map.</em></>}
             right={<><b style={{color:'#f7f5f1'}}>{hmCells.filter(c=>c.cals>0).length}</b> active days · <b style={{color:ORANGE}}>{streak.days}d</b> streak</>}/>
           <div style={{background:'var(--fd-surface)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:16,padding:20,backdropFilter:'blur(12px)'}} className="fd-heatmap-wrap">
             <Heatmap cells={hmCells} streakDays={streakDays}/>
           </div>
         </div>
+
+        {/* ── 04 Strava Training Intelligence ── */}
+        {fitTrend.length>0&&(
+          <div style={{marginTop:48}}>
+            {/* ── Strava-branded section header ── */}
+            <motion.div initial={{opacity:0,y:30}} animate={{opacity:1,y:0}} transition={{duration:0.55,ease:[0.2,0.7,0.2,1]}}
+              style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',gap:18,marginBottom:20,paddingBottom:16,
+                      borderBottom:'1px solid rgba(252,76,2,0.2)'}}>
+              <div style={{display:'flex',alignItems:'flex-end',gap:20}}>
+                <span style={{fontFamily:'var(--fd-mono)',fontSize:11,color:'var(--fd-ink3)',letterSpacing:'.16em',paddingBottom:3}}>04</span>
+                <div>
+                  <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6}}>
+                    {/* Strava pill badge */}
+                    <div style={{background:'#FC4C02',borderRadius:5,padding:'3px 9px',display:'inline-flex',alignItems:'center',gap:5,flexShrink:0}}>
+                      {/* Strava chevron mark */}
+                      <svg width="11" height="14" viewBox="0 0 11 14" fill="white" aria-hidden="true">
+                        <polygon points="5.5,0 0,9 2.5,9 5.5,3.5 8.5,9 11,9"/>
+                        <polygon points="8.5,9 5.5,14 2.5,9 4.5,9 5.5,11 6.5,9"/>
+                      </svg>
+                      <span style={{fontFamily:'var(--fd-sans)',fontWeight:800,fontSize:10.5,color:'white',letterSpacing:'.14em',textTransform:'uppercase'}}>Strava</span>
+                    </div>
+                    <span style={{fontFamily:'var(--fd-mono)',fontSize:9.5,color:'rgba(252,76,2,0.75)',letterSpacing:'.14em',textTransform:'uppercase'}}>Training Intelligence</span>
+                  </div>
+                  <h2 style={{fontFamily:'var(--fd-serif)',fontWeight:400,margin:0,fontSize:'clamp(24px,3vw,36px)',letterSpacing:'-0.02em',lineHeight:1.05,color:'var(--fd-ink1)'}}>Training <em style={{color:'rgba(255,255,255,0.45)'}}>intelligence.</em></h2>
+                </div>
+              </div>
+              <span style={{fontFamily:'var(--fd-mono)',fontSize:10.5,color:'var(--fd-ink3)',letterSpacing:'.06em',flexShrink:0}}>Fitness · Fatigue · HR Zones · Year-over-year · Best efforts</span>
+            </motion.div>
+
+            {/* Row 1 — Fitness & Freshness + HR Zones */}
+            <div className="fd-twocol" style={{display:'grid',gap:14,gridTemplateColumns:'7fr 4fr'}}>
+              <div style={{background:'var(--fd-surface)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:16,padding:20,backdropFilter:'blur(12px)'}}>
+                <div style={{fontFamily:'var(--fd-mono)',fontSize:10.5,color:'var(--fd-ink3)',letterSpacing:'.14em',textTransform:'uppercase',marginBottom:14}}>
+                  Fitness &amp; Freshness · 90-day
+                </div>
+                <FitnessFreshnessChart trend={fitTrend}/>
+              </div>
+              <div style={{background:'var(--fd-surface)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:16,padding:20,backdropFilter:'blur(12px)'}}>
+                <div style={{fontFamily:'var(--fd-mono)',fontSize:10.5,color:'var(--fd-ink3)',letterSpacing:'.14em',textTransform:'uppercase',marginBottom:14}}>
+                  HR Zone distribution
+                </div>
+                <HRZoneBars zones={hrZones}/>
+              </div>
+            </div>
+
+            {/* Row 2 — Weekly load + Year-over-year */}
+            <div className="fd-twocol" style={{display:'grid',gap:14,gridTemplateColumns:yoyData?'7fr 4fr':'1fr',marginTop:14}}>
+              <div style={{background:'var(--fd-surface)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:16,padding:20,backdropFilter:'blur(12px)'}}>
+                <div style={{fontFamily:'var(--fd-mono)',fontSize:10.5,color:'var(--fd-ink3)',letterSpacing:'.14em',textTransform:'uppercase',marginBottom:12}}>
+                  Weekly relative effort · 16 weeks
+                </div>
+                <WeeklyLoadBars weeks={weeklyLoad}/>
+              </div>
+              {yoyData&&(
+                <div style={{background:'var(--fd-surface)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:16,padding:20,backdropFilter:'blur(12px)'}}>
+                  <div style={{fontFamily:'var(--fd-mono)',fontSize:10.5,color:'var(--fd-ink3)',letterSpacing:'.14em',textTransform:'uppercase',marginBottom:14}}>
+                    Year over year
+                  </div>
+                  <YearOverYearCard yoy={yoyData}/>
+                </div>
+              )}
+            </div>
+
+            {/* Row 3 — Best efforts */}
+            <div style={{background:'var(--fd-surface)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:16,padding:20,backdropFilter:'blur(12px)',marginTop:14}}>
+              <div style={{fontFamily:'var(--fd-mono)',fontSize:10.5,color:'var(--fd-ink3)',letterSpacing:'.14em',textTransform:'uppercase',marginBottom:14}}>
+                Best efforts · estimated from run history
+              </div>
+              <BestEffortsRow efforts={bestEfforts}/>
+            </div>
+          </div>
+        )}
 
         {/* ── 05 Apple Health ── */}
         {trend30.length>0&&(
@@ -3039,7 +3685,7 @@ export default function FitnessDashboard(){
         {/* ── 06 Recovery & goals ── */}
         <div style={{marginTop:48}}>
           <SectionHead num={trend30.length>0?'06':'05'} label="30-day trend" title={<>Recovery & <em style={{color:'rgba(255,255,255,0.45)'}}>goals.</em></>}/>
-          <div style={{display:'grid',gap:14,gridTemplateColumns:'7fr 5fr'}}>
+          <div className="fd-twocol" style={{display:'grid',gap:14,gridTemplateColumns:'7fr 5fr'}}>
             <div style={{background:'var(--fd-surface)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:16,padding:20,minHeight:320,backdropFilter:'blur(12px)'}}>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',fontFamily:'"JetBrains Mono",monospace',fontSize:10.5,color:'rgba(255,255,255,0.35)',letterSpacing:'.16em',textTransform:'uppercase',marginBottom:16}}>
                 <span>HRV vs Resting HR</span>
@@ -3098,7 +3744,7 @@ export default function FitnessDashboard(){
             </div>
 
             {/* Volume timeline + Muscle frequency */}
-            <div style={{display:'grid',gap:14,gridTemplateColumns:'7fr 5fr',marginBottom:14}}>
+            <div className="fd-twocol" style={{display:'grid',gap:14,gridTemplateColumns:'7fr 5fr',marginBottom:14}}>
               <div style={{background:'var(--fd-surface)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:16,padding:20,backdropFilter:'blur(12px)'}}>
                 <div style={{fontFamily:'var(--fd-mono)',fontSize:10.5,color:'var(--fd-ink3)',letterSpacing:'.14em',textTransform:'uppercase',marginBottom:14}}>
                   Weekly volume (lbs) · last 8 weeks
@@ -3126,7 +3772,7 @@ export default function FitnessDashboard(){
         {/* ── 08 Training plan ── */}
         <div style={{marginTop:48}}>
           <SectionHead num="08" label="Mon → Sun" title={<>This week's <em style={{color:'rgba(255,255,255,0.45)'}}>plan.</em></>}/>
-          {data.plan?<Plan plan={data.plan}/>:<div style={{color:'rgba(255,255,255,0.3)',fontFamily:'"JetBrains Mono",monospace',fontSize:11,padding:24,textAlign:'center'}}>No plan generated yet</div>}
+          {data.plan?<Plan plan={data.plan} acts={data.acts} gymverse={data.gymverse} metrics={data.metrics} goals={data.goals}/>:<div style={{color:'rgba(255,255,255,0.3)',fontFamily:'"JetBrains Mono",monospace',fontSize:11,padding:24,textAlign:'center'}}>No plan generated yet</div>}
         </div>
 
         {/* ── 09 Insights & feed ── */}
@@ -3134,15 +3780,16 @@ export default function FitnessDashboard(){
           <SectionHead num="09" label="Coach notes" title={<>Read & <em style={{color:'rgba(255,255,255,0.45)'}}>react.</em></>}/>
 
           {/* Top row: coach notes + activity feed */}
-          {/* height is explicit so both columns are bounded — InsightCard fills it via height:100%,
-              activities panel scrolls internally within the same bounded row */}
-          <div style={{display:'grid',gap:14,gridTemplateColumns:'5fr 7fr',marginBottom:14,
+          <div className="fd-twocol fd-insights-row" style={{display:'grid',gap:14,gridTemplateColumns:'5fr 7fr',marginBottom:14,
                         height:'clamp(480px, 65vh, 680px)', alignItems:'stretch'}}>
             <InsightCard
               insight={data.insight}
               workouts={data.gymverse}
               exercisePRs={data.exercisePRs}
               bodyweightLbs={data.bodyweightLbs}
+              acts={data.acts}
+              metrics={data.metrics}
+              goals={data.goals}
             />
             <div style={{
               background:'var(--fd-surface)', border:'1px solid rgba(255,255,255,0.06)',
@@ -3170,7 +3817,7 @@ export default function FitnessDashboard(){
           </div>
 
           {/* Bottom row: run pace trend + strength snapshot */}
-          <div style={{display:'grid',gap:14,gridTemplateColumns: data.gymverse?.length > 0 ? '1fr 1fr' : '1fr'}}>
+          <div className="fd-twocol" style={{display:'grid',gap:14,gridTemplateColumns: data.gymverse?.length > 0 ? '1fr 1fr' : '1fr'}}>
             {/* Run pace trend — always visible */}
             <div style={{background:'var(--fd-surface)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:16,padding:20,backdropFilter:'blur(12px)'}}>
               <RunPaceTrendChart acts={data.acts}/>

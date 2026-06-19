@@ -99,6 +99,20 @@ export default function App() {
     }
   }
 
+  const onUpdate = async (id, { title, cat, prio }) => {
+    // Map UI field names to DB column names (partial update — don't touch context)
+    const dbPrio = prio === 'medium' ? 'med' : prio
+    setDbTasks(ts => ts.map(t => t.id === id
+      ? { ...t, text: title, type: cat, prio: dbPrio }
+      : t
+    ))
+    try {
+      await updateTask(id, { text: title, type: cat, prio: dbPrio })
+    } catch {
+      fetchTasks().then(setDbTasks)
+    }
+  }
+
   const onAdd = async ({ title, cat: c, prio }) => {
     const tmpId = 'tmp-' + Date.now()
     const now   = new Date().toISOString()
@@ -221,7 +235,7 @@ export default function App() {
             </div>
 
             <div className="scroll">
-              <TaskList tasks={visible} onToggle={onToggle} onDelete={onDelete} onSaveNote={onSaveNote} onRefresh={onRefresh} />
+              <TaskList tasks={visible} onToggle={onToggle} onDelete={onDelete} onSaveNote={onSaveNote} onUpdate={onUpdate} onRefresh={onRefresh} />
             </div>
             <Composer onAdd={onAdd} defaultCat={cat === 'personal' ? 'personal' : 'work'} />
           </>

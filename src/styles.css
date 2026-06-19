@@ -38,7 +38,9 @@ input, textarea { font: inherit; color: inherit; background: transparent; border
   grid-template-rows: 1fr;
 }
 @media (max-width: 860px) {
-  .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
+  .app {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* sidebar */
@@ -111,15 +113,15 @@ input, textarea { font: inherit; color: inherit; background: transparent; border
   .mhead {
     display: flex; align-items: center; justify-content: space-between;
     padding: 14px 18px; border-bottom: 1px solid var(--line);
-    position: sticky; top: 0; background: var(--bg); z-index: 5;
+    position: sticky; top: 0; background: var(--bg); z-index: 10;
   }
   .mhead .brand .logo { width: 32px; height: 32px; flex-basis: 32px; border-radius: 9px; }
   .mhead .brand .name .who { font-size: 18px; }
   .mhead .brand .name .values { display: none; }
   .mfilter {
     display: flex; gap: 6px; padding: 0 14px 10px; overflow: auto;
-    border-bottom: 1px solid var(--line); background: var(--bg);
-    position: sticky; top: 51px; z-index: 4;
+    border-bottom: 1px solid var(--line); background: var(--bg); z-index: 9;
+    position: sticky; top: 61px;
   }
   .mfilter button {
     flex: 0 0 auto; padding: 7px 12px; border-radius: 999px;
@@ -128,9 +130,9 @@ input, textarea { font: inherit; color: inherit; background: transparent; border
   }
   .mfilter button.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
   .mtabbar {
+    position: fixed; bottom: 0; left: 0; right: 0;
     display: flex; border-top: 1px solid var(--line); background: var(--bg);
-    position: sticky; bottom: 0; z-index: 6;
-    padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); gap: 6px;
+    z-index: 8; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); gap: 6px;
   }
   .mtabbar button { flex: 1; padding: 10px; border-radius: 10px; font-size: 13px; color: var(--ink-3); display: flex; flex-direction: column; align-items: center; gap: 2px; }
   .mtabbar button.active { background: var(--bg-3); color: var(--ink); }
@@ -170,7 +172,7 @@ input, textarea { font: inherit; color: inherit; background: transparent; border
 /* task list */
 .scroll { flex: 1; min-height: 0; overflow: auto; }
 .list { padding: 14px 24px 120px; display: flex; flex-direction: column; gap: 6px; }
-@media (max-width: 860px) { .list { padding: 8px 12px 24px; } }
+@media (max-width: 860px) { .list { padding: 8px 12px calc(160px + env(safe-area-inset-bottom)); } }
 .group-label {
   font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em;
   color: var(--ink-3); text-transform: uppercase; padding: 14px 12px 6px;
@@ -251,12 +253,132 @@ input, textarea { font: inherit; color: inherit; background: transparent; border
 .notes-hint { font-family: var(--mono); font-size: 10px; color: var(--ink-3); margin-top: 6px; letter-spacing: 0.04em; }
 .note-preview { font-size: 12.5px; color: var(--ink-3); line-height: 1.45; padding-left: 10px; border-left: 2px solid var(--line); margin-top: 2px; }
 
+/* ── Inline task edit mode ─────────────────────────────────────────────────── */
+.task.task-editing { background: var(--bg-2); }
+.task.task-editing .actions { opacity: 1; }
+.icon-btn.active { background: var(--bg-3); color: var(--ink); }
+
+.task-edit-form { display: flex; flex-direction: column; gap: 10px; padding: 2px 0; min-width: 0; }
+.task-edit-input {
+  width: 100%; padding: 7px 10px; font-size: 14.5px; line-height: 1.35;
+  background: var(--bg); border: 1.5px solid var(--line-2); border-radius: 8px;
+  color: var(--ink); transition: border-color .18s ease;
+}
+.task-edit-input:focus { border-color: var(--ink-2); outline: none; }
+.task-edit-input::placeholder { color: var(--ink-3); }
+
+.task-edit-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+/* reuse .seg styles; these are already defined globally */
+
+.task-edit-save {
+  padding: 5px 14px; border-radius: 8px; font-family: var(--mono); font-size: 11px;
+  letter-spacing: .06em; background: var(--ink); color: var(--bg);
+  transition: opacity .15s ease, transform .15s ease; cursor: pointer;
+}
+.task-edit-save:hover { opacity: .85; transform: translateY(-1px); }
+.task-edit-save:disabled { opacity: .35; cursor: not-allowed; transform: none; }
+
+.task-edit-cancel {
+  padding: 5px 12px; border-radius: 8px; font-family: var(--mono); font-size: 11px;
+  letter-spacing: .06em; background: transparent; color: var(--ink-3);
+  border: 1px solid var(--line); transition: background .15s ease, color .15s ease; cursor: pointer;
+}
+.task-edit-cancel:hover { background: var(--bg-3); color: var(--ink); }
+
+/* ── Staleness badge ──────────────────────────────────────────────────────── */
+.stale-badge {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em;
+  padding: 1px 7px; border-radius: 999px;
+  border: 1px solid currentColor; opacity: 0.85;
+  /* color is set inline per level */
+}
+.stale-badge.stale-aging   { border-color: rgba(247,245,241,.25); }
+.stale-badge.stale-stale   { border-color: oklch(79% 0.16 70 / .35); background: oklch(79% 0.16 70 / .07); }
+.stale-badge.stale-old     { border-color: oklch(73% 0.19 48 / .4);  background: oklch(73% 0.19 48 / .09); }
+.stale-badge.stale-ancient { border-color: oklch(68% 0.22 28 / .45); background: oklch(68% 0.22 28 / .11); }
+
+/* ── Recurring tasks ──────────────────────────────────────────────────────── */
+.recur-task {
+  position: relative;
+  border: 1px solid var(--line);      /* override default borderless task */
+  border-radius: var(--r);
+}
+.recur-task.recur-missed { background: rgba(255,255,255,0.03); }
+.recur-task.recur-done   { opacity: 0.55; }
+
+/* Animated left color strip */
+.recur-strip {
+  position: absolute; left: 0; top: 6px; bottom: 6px;
+  width: 3px; border-radius: 2px;
+  /* background set inline */
+}
+
+/* Pulse glow on the strip when missed 2+ */
+.recur-missed .recur-strip {
+  animation: recur-pulse 2.2s ease-in-out infinite;
+}
+@keyframes recur-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+
+/* Recurring composer / add button */
+.recur-composer-wrap { padding: 4px 14px 6px; }
+.recur-add-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .04em;
+  color: var(--ink-3); padding: 5px 10px; border-radius: 8px;
+  border: 1px dashed var(--line-2);
+  transition: background .15s, color .15s, border-color .15s;
+}
+.recur-add-btn:hover:not(:disabled) { background: var(--bg-2); color: var(--ink); border-color: var(--line); }
+.recur-add-btn:disabled { opacity: .35; cursor: not-allowed; }
+.recur-form { padding: 6px 0 4px; display: flex; flex-direction: column; gap: 0; }
+
+/* ── Done-list pagination ──────────────────────────────────────────────────── */
+.done-pagination {
+  display: flex; align-items: center; justify-content: center;
+  gap: 6px; padding: 14px 14px 6px;
+}
+.dpg-btn {
+  width: 30px; height: 30px; border-radius: 8px;
+  font-size: 14px; color: var(--ink-3);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background .15s ease, color .15s ease;
+}
+.dpg-btn:hover:not(:disabled) { background: var(--bg-3); color: var(--ink); }
+.dpg-btn:disabled { opacity: .25; cursor: not-allowed; }
+.dpg-pages { display: flex; gap: 3px; }
+.dpg-page {
+  min-width: 30px; height: 30px; padding: 0 6px; border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background .15s ease, color .15s ease;
+}
+.dpg-page:hover { background: var(--bg-3); color: var(--ink); }
+.dpg-page.active {
+  background: var(--ink); color: var(--bg);
+  font-weight: 600;
+}
+
 .empty { padding: 50px 28px; text-align: center; color: var(--ink-3); font-family: var(--serif); font-style: italic; font-size: 22px; }
 .empty .sub { font-family: var(--sans); font-style: normal; font-size: 12px; margin-top: 8px; color: var(--ink-3); }
 
 /* composer */
 .composer-wrap { position: sticky; bottom: 0; padding: 14px 24px 22px; background: linear-gradient(to bottom, transparent, var(--bg) 30%); }
-@media (max-width: 860px) { .composer-wrap { padding: 10px 12px 14px; } }
+@media (max-width: 860px) {
+  .composer-wrap {
+    position: fixed;
+    bottom: calc(72px + env(safe-area-inset-bottom));
+    left: 0; right: 0;
+    z-index: 7;
+    padding: 10px 12px;
+    background: var(--bg);
+    border-top: 1px solid var(--line-2);
+  }
+}
 .composer {
   display: flex; align-items: center; gap: 6px;
   border: 1px solid var(--line); background: var(--bg); padding: 8px; border-radius: 14px;
@@ -473,13 +595,18 @@ input, textarea { font: inherit; color: inherit; background: transparent; border
   .fd .fd-herostats { grid-template-columns: repeat(3, 1fr) !important; }
 }
 @media (max-width: 860px) {
-  .fd .fd-herostats { grid-template-columns: repeat(2, 1fr) !important; }
-  .fd .fd-twocol   { grid-template-columns: 1fr !important; }
-  .fd .fd-plan     { grid-template-columns: repeat(4, 1fr) !important; }
+  .fd .fd-herostats  { grid-template-columns: repeat(2, 1fr) !important; }
+  .fd .fd-twocol     { grid-template-columns: 1fr !important; }
+  .fd .fd-plan       { grid-template-columns: repeat(4, 1fr) !important; }
+  /* Coach notes + feed: remove fixed height so they stack naturally */
+  .fd .fd-insights-row { height: auto !important; }
+  /* Route map: smaller on mobile */
+  .fd .fd-routemap-map { height: 300px !important; }
 }
 @media (max-width: 560px) {
   .fd .fd-plan     { grid-template-columns: repeat(2, 1fr) !important; }
   .fd .fd-goals    { grid-template-columns: 1fr !important; }
+  .fd .fd-routemap-map { height: 240px !important; }
 }
 
 /* Leaflet dark-mode overrides inside .fd */

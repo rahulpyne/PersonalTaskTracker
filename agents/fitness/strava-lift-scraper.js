@@ -27,9 +27,10 @@ const __dir       = path.dirname(fileURLToPath(import.meta.url))
 const CONFIG_FILE = path.join(__dir, 'strava-config.json')
 
 // ── CLI args (used when running standalone) ───────────────────────────────────
-const args     = process.argv.slice(2)
-const LOOKBACK = Number(args.find(a => a.startsWith('--days='))?.split('=')[1] ?? 14)
-const DRY_RUN  = args.includes('--dry-run')
+const args          = process.argv.slice(2)
+const LOOKBACK      = Number(args.find(a => a.startsWith('--days='))?.split('=')[1] ?? 14)
+const DRY_RUN       = args.includes('--dry-run')
+const SKIP_EXISTING = args.includes('--skip-existing')  // skip activities already in DB (saves Gemini API cost on backfills)
 
 // ── Strava token refresh ──────────────────────────────────────────────────────
 async function getToken() {
@@ -362,6 +363,31 @@ function toCanonicalKey(name) {
   return null
 }
 
+// ── Exercise name normaliser ──────────────────────────────────────────────────
+// Fixes capitalization and punctuation so the same exercise scraped on different
+// days doesn't end up as two separate PR rows.
+function normaliseExerciseName(raw) {
+  if (!raw) return raw
+  return raw
+    .trim()
+    // Step 1: Title-case every word
+    .replace(/\b\w+\b/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    // Step 2: Restore known uppercase acronyms
+    .replace(/\bEz\b/g,  'EZ')
+    .replace(/\bOhp\b/g, 'OHP')
+    .replace(/\bRdl\b/g, 'RDL')
+    .replace(/\bT-bar\b/gi, 'T-Bar')
+    // Step 3: Collapse EZ-Bar / EZ Bar variants → "EZ Bar"
+    .replace(/EZ[-–]\s*Bar\b/gi, 'EZ Bar')
+    // Step 4: Singular "Tricep" not "Triceps" for consistency
+    .replace(/\bTriceps\b/g, 'Tricep')
+    // Step 5: Drop trailing comma-separated qualifiers that Gemini sometimes adds
+    // e.g. "Lat Pulldown, Overhand Grip" vs "Lat Pulldown" — keep base name
+    // (only collapse if the qualifier after the comma is a grip/stance descriptor)
+    .replace(/,\s*(Overhand|Underhand|Neutral|Pronated|Supinated|Wide|Narrow|Close|Standard)\s*Grip$/i, '')
+    .trim()
+}
+
 // ── PR maintenance — upsert gymverse_exercise_prs ────────────────────────────
 async function upsertExercisePRs(supabase, workouts) {
   // Aggregate all appearances of each exercise across all provided workouts
@@ -373,8 +399,11 @@ async function upsertExercisePRs(supabase, workouts) {
     const workoutId   = w.external_id
 
     for (const ex of (w.exercises || [])) {
-      const name = ex.name
-      if (!name) continue
+      const rawName = ex.name
+      if (!rawName) continue
+      // Skip "Unknown …" entries — they carry no usable exercise data
+      if (/^unknown\b/i.test(rawName.trim())) continue
+      const name = normaliseExerciseName(rawName)
       if (!byExercise[name]) byExercise[name] = []
       byExercise[name].push({
         date,
@@ -403,8 +432,8 @@ async function upsertExercisePRs(supabase, workouts) {
 
     const canonical_key = toCanonicalKey(exercise_name)
 
-    // Keep last 20 appearances for the history chart
-    const history = appearances.slice(-20).map(a => ({
+    // Keep up to 50 appearances for the history chart (enough for ~1 year of weekly sessions)
+    const history = appearances.slice(-50).map(a => ({
       date:           a.date,
       workout_name:   a.workout_name,
       e1rm_lbs:       a.e1rm_lbs,
@@ -436,12 +465,13 @@ async function upsertExercisePRs(supabase, workouts) {
 
 // ── Core run function (exported for orchestrator) ─────────────────────────────
 export async function run(supabase, opts = {}) {
-  const lookbackDays = opts.lookbackDays ?? LOOKBACK
-  const dryRun       = opts.dryRun       ?? DRY_RUN
+  const lookbackDays  = opts.lookbackDays  ?? LOOKBACK
+  const dryRun        = opts.dryRun        ?? DRY_RUN
+  const skipExisting  = opts.skipExisting  ?? SKIP_EXISTING
 
   const gemini = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
 
-  log(`StravaLiftScraper: starting — lookback ${lookbackDays}d${dryRun ? ' [DRY RUN]' : ''}`)
+  log(`StravaLiftScraper: starting — lookback ${lookbackDays}d${dryRun ? ' [DRY RUN]' : ''}${skipExisting ? ' [skip-existing]' : ''}`)
 
   const token = await getToken()
 
@@ -453,11 +483,25 @@ export async function run(supabase, opts = {}) {
     return { processed: 0, saved: 0 }
   }
 
+  // ── Build set of already-scraped activity IDs (for --skip-existing / backfill mode) ──
+  let existingIds = new Set()
+  if (skipExisting) {
+    const { data: existing } = await supabase.from('gymverse_workouts').select('external_id')
+    existingIds = new Set((existing || []).map(r => String(r.external_id)))
+    log(`StravaLiftScraper: ${existingIds.size} workouts already in DB — will skip`)
+  }
+
   let totalPhotos = 0, analysedPhotos = 0, saved = 0
   const confRank = { high: 3, medium: 2, low: 1 }
 
   for (const act of activities) {
     log(`\nStravaLiftScraper: ── ${act.name} (${act.id}) ${act.start_date?.slice(0,10)} ──`)
+
+    // Skip activities already in DB when running backfill with --skip-existing
+    if (skipExisting && existingIds.has(String(act.id))) {
+      log('  already in DB — skipping (--skip-existing)')
+      continue
+    }
 
     const photos = await fetchActivityPhotos(act.id, token)
     if (!photos.length) { log('  no photos — skipping'); continue }
@@ -528,14 +572,19 @@ export async function run(supabase, opts = {}) {
     else { log('  ✅ saved'); saved++ }
   }
 
-  // ── Refresh PR table from full history (not just this run's lookback) ────────
-  if (!dryRun && saved > 0) {
+  // ── Refresh PR table from full history (runs unconditionally, not gated on saved > 0) ──
+  // This ensures re-runs always rebuild correct all-time history even with no new scraped acts.
+  if (!dryRun) {
     try {
       const { data: allWorkouts } = await supabase
         .from('gymverse_workouts')
         .select('external_id,workout_name,workout_date,started_at,exercises')
         .order('workout_date', { ascending: true })
-      if (allWorkouts?.length) await upsertExercisePRs(supabase, allWorkouts)
+      if (allWorkouts?.length) {
+        await upsertExercisePRs(supabase, allWorkouts)
+      } else {
+        log('StravaLiftScraper: no workouts in DB yet — skipping PR refresh')
+      }
     } catch(e) {
       warn(`StravaLiftScraper: PR maintenance failed — ${e.message}`)
     }
