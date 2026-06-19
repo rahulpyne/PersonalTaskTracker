@@ -1,0 +1,8 @@
+# Environment files with secrets — never deploy these
+.env.prod
+.env.vercel
+agents/.env
+.env.local
+
+# Agent/backend code — not needed for the frontend build
+agents/

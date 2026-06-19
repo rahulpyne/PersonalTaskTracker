@@ -4,6 +4,18 @@
       "command": "node",
       "args": ["mcp-server/index.js"],
       "cwd": "/Users/rahulpyne/repo/PersonalTaskTracker"
+    },
+    "strava": {
+      "command": "node",
+      "args": ["fitness/strava-mcp.js"],
+      "cwd": "/Users/rahulpyne/repo/PersonalTaskTracker/agents",
+      "env": {
+        "STRAVA_CLIENT_ID": "248660",
+        "STRAVA_CLIENT_SECRET": "2ec4d58616036c5f25ac68b031931c662b079235",
+        "SUPABASE_URL": "https://sozysnvupisjygmwdzej.supabase.co",
+        "SUPABASE_SERVICE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNvenlzbnZ1cGlzanlnbXdkemVqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODc3ODA5OCwiZXhwIjoyMDk0MzU0MDk4fQ.pXFJAtGmWfpG2clY_wgHmld2r6xXSxd0r5I54qOE8Vo",
+        "DOTENV_CONFIG_PATH": "/Users/rahulpyne/repo/PersonalTaskTracker/agents/.env"
+      }
     }
   }
 }

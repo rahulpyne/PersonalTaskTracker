@@ -9,7 +9,7 @@ import Notes from './pages/Notes'
 import Graph from './pages/Graph'
 import { toUI, toDB, toDBToggle } from './lib/adapter'
 import { buildHistory } from './lib/history'
-import { fetchTasks, createTask, updateTask, deleteTask, clearCompleted, subscribeToTasks } from './lib/tasks'
+import { fetchTasks, createTask, updateTask, deleteTask, clearCompleted, markCleared, filterCleared, subscribeToTasks } from './lib/tasks'
 import { fetchNotes } from './lib/notes'
 
 const TODAY_LABEL = new Date().toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric' })
@@ -32,7 +32,7 @@ export default function App() {
   useEffect(() => {
     Promise.all([fetchTasks(), fetchNotes()])
       .then(([taskRows, noteRows]) => {
-        setDbTasks(taskRows)
+        setDbTasks(filterCleared(taskRows))
         setNoteCount(noteRows.length)
       })
       .catch(e => setError(e.message))
@@ -41,7 +41,7 @@ export default function App() {
 
   useEffect(() => {
     const unsub = subscribeToTasks(() => {
-      fetchTasks().then(setDbTasks).catch(console.error)
+      fetchTasks().then(rows => setDbTasks(filterCleared(rows))).catch(console.error)
     })
     return unsub
   }, [])
@@ -76,7 +76,7 @@ export default function App() {
     try {
       await updateTask(id, dbFields)
     } catch {
-      fetchTasks().then(setDbTasks)
+      fetchTasks().then(rows => setDbTasks(filterCleared(rows)))
     }
   }
 
@@ -95,7 +95,7 @@ export default function App() {
     try {
       await updateTask(id, { context: notes })
     } catch {
-      fetchTasks().then(setDbTasks)
+      fetchTasks().then(rows => setDbTasks(filterCleared(rows)))
     }
   }
 
@@ -109,7 +109,7 @@ export default function App() {
     try {
       await updateTask(id, { text: title, type: cat, prio: dbPrio })
     } catch {
-      fetchTasks().then(setDbTasks)
+      fetchTasks().then(rows => setDbTasks(filterCleared(rows)))
     }
   }
 
@@ -128,17 +128,14 @@ export default function App() {
 
   // Used by TaskItem after AI generation to pull fresh embedded subtasks
   const onRefresh = useCallback(() => {
-    fetchTasks().then(setDbTasks).catch(console.error)
+    fetchTasks().then(rows => setDbTasks(filterCleared(rows))).catch(console.error)
   }, [])
 
-  const onClearCompleted = async () => {
-    const prev = dbTasks
-    setDbTasks(ts => ts.filter(t => !t.completed))
-    try {
-      await clearCompleted()
-    } catch {
-      setDbTasks(prev)
-    }
+  const onClearCompleted = () => {
+    const clearedIds = dbTasks.filter(t => t.done).map(t => t.id)
+    if (!clearedIds.length) return
+    markCleared(clearedIds)
+    setDbTasks(ts => ts.filter(t => !t.done))
   }
 
   // ── Render ─────────────────────────────────────────────────────

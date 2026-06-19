@@ -3,22 +3,25 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start":            "node orchestrator.js",
-    "run-now":          "node orchestrator.js --now",
-    "run-insights":     "node orchestrator.js --now --insights",
-    "setup-oauth":      "node setup-oauth.js",
-    "setup-strava":     "node fitness/strava-oauth.js",
-    "health-webhook":   "node fitness/health-webhook.js",
+    "start": "node orchestrator.js",
+    "run-now": "node orchestrator.js --now",
+    "run-insights": "node orchestrator.js --now --insights",
+    "setup-oauth": "node setup-oauth.js",
+    "setup-strava": "node fitness/strava-oauth.js",
+    "health-webhook": "node fitness/health-webhook.js",
     "gymverse-webhook": "node fitness/gymverse-webhook.js",
-    "scrape-lifts":     "node fitness/strava-lift-scraper.js",
-    "scrape-lifts:90":  "node fitness/strava-lift-scraper.js --days=90",
-    "scrape-lifts:dry": "node fitness/strava-lift-scraper.js --days=90 --dry-run"
+    "scrape-lifts": "node fitness/strava-lift-scraper.js",
+    "scrape-lifts:90": "node fitness/strava-lift-scraper.js --days=90",
+    "scrape-lifts:dry": "node fitness/strava-lift-scraper.js --days=90 --dry-run",
+    "scrape-lifts:backfill": "node fitness/strava-lift-scraper.js --days=365 --skip-existing",
+    "strava-mcp":       "node fitness/strava-mcp.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
-    "@supabase/supabase-js":  "^2.47.0",
-    "dotenv":                 "^16.4.7",
-    "googleapis":             "^144.0.0",
-    "node-cron":              "^3.0.3"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@supabase/supabase-js": "^2.47.0",
+    "dotenv": "^16.4.7",
+    "googleapis": "^144.0.0",
+    "node-cron": "^3.0.3"
   }
 }

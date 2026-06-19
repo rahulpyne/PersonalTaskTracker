@@ -38,14 +38,33 @@ export async function deleteTask(id) {
   if (error) throw error
 }
 
+// Soft-clear: store cleared IDs in localStorage; backend tasks preserved for AI insights
+const CLEARED_KEY = 'tracker:cleared'
+
+export function markCleared(ids) {
+  let cleared = {}
+  try { cleared = JSON.parse(localStorage.getItem(CLEARED_KEY) || '{}') } catch {}
+  const now = Date.now()
+  const cutoff = now - 31 * 86400000
+  ids.forEach(id => { cleared[id] = now })
+  for (const id of Object.keys(cleared)) {
+    if (cleared[id] < cutoff) delete cleared[id]
+  }
+  localStorage.setItem(CLEARED_KEY, JSON.stringify(cleared))
+}
+
+export function getClearedIds() {
+  try { return new Set(Object.keys(JSON.parse(localStorage.getItem(CLEARED_KEY) || '{}'))) } catch { return new Set() }
+}
+
+export function filterCleared(tasks) {
+  const cleared = getClearedIds()
+  return tasks.filter(t => !t.done || !cleared.has(t.id))
+}
+
 export async function clearCompleted() {
-  // Only delete top-level completed tasks (cascade removes their subtasks)
-  const { error } = await supabase
-    .from('tasks')
-    .delete()
-    .eq('done', true)
-    .is('parent_id', null)
-  if (error) throw error
+  // Intentionally a no-op — clearing is frontend-only via markCleared() + filterCleared()
+  // Backend tasks remain intact so AI insight generation is never affected
 }
 
 // ── Subtask toggle (still a direct row update) ────────────────────────────────
