@@ -598,6 +598,9 @@ input, textarea { font: inherit; color: inherit; background: transparent; border
   .fd .fd-herostats  { grid-template-columns: repeat(2, 1fr) !important; }
   .fd .fd-twocol     { grid-template-columns: 1fr !important; }
   .fd .fd-plan       { grid-template-columns: repeat(4, 1fr) !important; }
+  /* Best efforts (6 cards) and strength summary (4 cards) fold to 3/2 cols */
+  .fd .fd-besteff    { grid-template-columns: repeat(3, 1fr) !important; }
+  .fd .fd-statgrid   { grid-template-columns: repeat(2, 1fr) !important; }
   /* Coach notes + feed: remove fixed height so they stack naturally */
   .fd .fd-insights-row { height: auto !important; }
   /* Route map: smaller on mobile */
@@ -606,6 +609,8 @@ input, textarea { font: inherit; color: inherit; background: transparent; border
 @media (max-width: 560px) {
   .fd .fd-plan     { grid-template-columns: repeat(2, 1fr) !important; }
   .fd .fd-goals    { grid-template-columns: 1fr !important; }
+  .fd .fd-besteff  { grid-template-columns: repeat(2, 1fr) !important; }
+  .fd .fd-statgrid { grid-template-columns: repeat(2, 1fr) !important; }
   .fd .fd-routemap-map { height: 240px !important; }
 }
 

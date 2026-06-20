@@ -1413,11 +1413,18 @@ function Goals({goals}) {
 // ── Training plan ─────────────────────────────────────────────────────────────
 const MG_RECOVERY={chest:2,back:2,legs:3,leg:3,bicep:2,biceps:2,tricep:2,triceps:2,core:1,shoulder:2,shoulders:2}
 
+// Local calendar date (YYYY-MM-DD) for a timestamp — avoids UTC bucketing that
+// pushes evening activities in western timezones onto the next day.
+function localDateStr(d){
+  const x=new Date(d)
+  return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`
+}
+
 function getThisWeekDates(){
   const d=new Date(),dow=d.getDay()
   d.setDate(d.getDate()-(dow===0?6:dow-1))
   d.setHours(0,0,0,0)
-  return Array.from({length:7},(_,i)=>{const nd=new Date(d);nd.setDate(d.getDate()+i);return nd.toISOString().slice(0,10)})
+  return Array.from({length:7},(_,i)=>{const nd=new Date(d);nd.setDate(d.getDate()+i);return localDateStr(nd)})
 }
 
 function Plan({plan,acts=[],gymverse=[],metrics=[],goals=[]}){
@@ -1426,13 +1433,13 @@ function Plan({plan,acts=[],gymverse=[],metrics=[],goals=[]}){
 
   const actsByDow=useMemo(()=>{
     const m={}
-    for(const a of acts){const di=weekDates.indexOf((a.started_at||'').slice(0,10));if(di>=0)(m[di]||(m[di]=[])).push(a)}
+    for(const a of acts){if(!a.started_at)continue;const di=weekDates.indexOf(localDateStr(a.started_at));if(di>=0)(m[di]||(m[di]=[])).push(a)}
     return m
   },[acts,weekDates])
 
   const workoutsByDow=useMemo(()=>{
     const m={}
-    for(const w of gymverse){const di=weekDates.indexOf(w.workout_date||(w.started_at||'').slice(0,10));if(di>=0)(m[di]||(m[di]=[])).push(w)}
+    for(const w of gymverse){const ds=w.workout_date||(w.started_at?localDateStr(w.started_at):null);if(!ds)continue;const di=weekDates.indexOf(ds);if(di>=0)(m[di]||(m[di]=[])).push(w)}
     return m
   },[gymverse,weekDates])
 
@@ -1456,7 +1463,7 @@ function Plan({plan,acts=[],gymverse=[],metrics=[],goals=[]}){
   },[gymverse])
 
   const weekRunKm=useMemo(()=>+(acts
-    .filter(a=>['run','Run'].includes(a.type)&&weekDates.includes((a.started_at||'').slice(0,10)))
+    .filter(a=>['run','Run'].includes(a.type)&&a.started_at&&weekDates.includes(localDateStr(a.started_at)))
     .reduce((s,a)=>s+(a.distance_m||0),0)/1000).toFixed(1),[acts,weekDates])
 
   const weekRunGoal=(goals.find(g=>g.slug==='auto:run_week')?.target_value)||20
@@ -2220,7 +2227,7 @@ function HealthTrends({daily}){
         <MiniSparkline data={d.map(x=>x.exercise_mins)} color="oklch(72% 0.16 200)" label="Exercise"     unit="min"    good="up"/>
         <MiniSparkline data={d.map(x=>x.stand_hours)}   color="oklch(70% 0.12 160)" label="Stand Hours"  unit="hrs"    good="up"/>
         <MiniSparkline data={d.map(x=>x.sleep_deep_hrs)}color="oklch(65% 0.14 235)" label="Deep Sleep"   unit="hrs"    dec={1} good="up"/>
-        {d.some(x=>x.weight_kg>0)&&<MiniSparkline data={d.map(x=>x.weight_kg||0)} color="oklch(72% 0.14 280)" label="Body Weight" unit="kg" dec={1} good="down"/>}
+        {d.some(x=>x.weight_kg>0)&&<MiniSparkline data={d.map(x=>x.weight_kg?+(x.weight_kg*2.205).toFixed(1):0)} color="oklch(72% 0.14 280)" label="Body Weight" unit="lbs" dec={1} good="down"/>}
         <SleepStages daily={d}/>
       </div>
     </div>
@@ -3384,7 +3391,7 @@ function BestEffortsRow({efforts}){
   const pacePerKm=e=>e.secs?Math.round(e.secs/(e.m/1000)):null
   const fmtPace=spm=>{if(!spm)return'';const m=Math.floor(spm/60),s=spm%60;return`${m}:${String(s).padStart(2,'0')}/km`}
   return(
-    <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:10}}>
+    <div className="fd-besteff" style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:10}}>
       {efforts.map((e,i)=>(
         <motion.div key={e.name} initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} transition={{delay:i*0.06,duration:0.4}}
           style={{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.07)',borderRadius:12,padding:'14px 12px',textAlign:'center'}}>
@@ -3725,7 +3732,7 @@ export default function FitnessDashboard(){
               right={<span style={{fontFamily:'var(--fd-mono)',fontSize:10,color:'var(--fd-ink3)'}}>{gv.length} sessions scraped from Strava photos · Gemini Vision</span>}/>
 
             {/* Summary stats */}
-            <div style={{display:'grid',gap:12,gridTemplateColumns:'repeat(4,1fr)',marginBottom:14}}>
+            <div className="fd-statgrid" style={{display:'grid',gap:12,gridTemplateColumns:'repeat(4,1fr)',marginBottom:14}}>
               {[
                 {label:'Month volume',val:monthVolLbs>0?(monthVolLbs/1000).toFixed(1)+'k':'—',unit:'lbs',color:ORANGE},
                 {label:'Sessions',val:gv.length,unit:'total',color:'var(--fd-ink1)'},

@@ -189,8 +189,11 @@ When in doubt about flat vs incline vs decline, look at bench angle in the image
 `.trim()
 
 async function analyseImage({ data, mimeType }, activityName, caption, gemini) {
+  // flash (not flash-lite) — reading exercise names/weights off workout
+  // whiteboards and app screenshots is OCR-heavy; the lite tier misses most
+  // of the list. Override with GEMINI_MODEL if needed.
   const model = gemini.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite',
+    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
   })
 
   const contextNote = [
@@ -226,6 +229,9 @@ function mergeExercises(allExtractions) {
     for (const ex of (extracted.exercises ?? [])) {
       const key = ex.name?.toLowerCase().trim()
       if (!key) continue
+      // Drop unreadable placeholders — Gemini emits these when it sees gym
+      // equipment but can't read the exercise name. They pollute the lifts grid.
+      if (/^unknown\b/.test(key) || key === 'exercise') continue
 
       if (!byName.has(key)) {
         byName.set(key, {
