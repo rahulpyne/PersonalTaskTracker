@@ -10,10 +10,28 @@
  *
  * Standalone:  node fitness/calendar-sync.js
  */
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import { createCalendarClient, fetchGoogleEvents, fetchCalendlyEvents } from '../lib/calendar.js'
 import { log, warn } from '../lib/logger.js'
 
 const LOOKAHEAD_DAYS = 35
+const ACCOUNTS_FILE  = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'accounts.json')
+
+// setup-oauth.js writes the calendar-scoped refresh token into accounts.json,
+// so that's the source of truth. CALENDAR_ACCOUNT picks which email's calendar
+// to sync (defaults to the first account). Falls back to GOOGLE_REFRESH_TOKEN.
+function resolveGoogleToken(explicit) {
+  if (explicit) return explicit
+  try {
+    const accounts = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf-8'))
+    const wanted   = process.env.CALENDAR_ACCOUNT
+    const acct     = (wanted && accounts.find(a => a.email === wanted)) || accounts[0]
+    if (acct?.refreshToken) return acct.refreshToken
+  } catch { /* fall through */ }
+  return process.env.GOOGLE_REFRESH_TOKEN
+}
 
 export async function run(supabase, opts = {}) {
   const now      = new Date()
@@ -24,7 +42,7 @@ export async function run(supabase, opts = {}) {
 
   const clientId     = opts.clientId     ?? process.env.GOOGLE_CLIENT_ID
   const clientSecret = opts.clientSecret ?? process.env.GOOGLE_CLIENT_SECRET
-  const refreshToken = opts.refreshToken ?? process.env.GOOGLE_REFRESH_TOKEN
+  const refreshToken = resolveGoogleToken(opts.refreshToken)
   const calendlyTok  = opts.calendlyToken ?? process.env.CALENDLY_TOKEN
 
   let rows = []
