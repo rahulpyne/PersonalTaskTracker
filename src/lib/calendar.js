@@ -15,6 +15,30 @@ export async function fetchCalendarEvents(fromISO, toISO) {
   return data || []
 }
 
+// Auto-scheduled task blocks overlapping a window (proposed/approved/confirmed).
+export async function fetchTaskBlocks(fromISO, toISO) {
+  const { data, error } = await supabase
+    .from('task_blocks')
+    .select('id,task_id,title,category,prio,duration_mins,start_at,end_at,status')
+    .lt('start_at', toISO)
+    .gt('end_at', fromISO)
+    .in('status', ['proposed', 'approved', 'confirmed'])
+    .order('start_at', { ascending: true })
+  if (error) throw error
+  return data || []
+}
+
+// Approve a proposed block (the nightly agent then writes it to Google Calendar)
+export async function approveBlock(id) {
+  const { error } = await supabase.from('task_blocks').update({ status: 'approved' }).eq('id', id)
+  if (error) throw error
+}
+
+export async function approveAllProposed() {
+  const { error } = await supabase.from('task_blocks').update({ status: 'approved' }).eq('status', 'proposed')
+  if (error) throw error
+}
+
 // Latest weekly fitness plan ({ plan: { monday: {type,durationMins,notes}, ... } })
 export async function fetchLatestPlan() {
   const { data, error } = await supabase

@@ -46,6 +46,34 @@ export async function fetchGoogleEvents(calendar, { timeMin, timeMax, calendarId
   return out
 }
 
+// ── Google Calendar writes (needs calendar.events scope) ─────────────────────
+
+// Create a timed event; returns the new event id. colorId 6 = tangerine (tasks).
+export async function createGoogleEvent(calendar, { summary, description, start, end, colorId = '6', calendarId = 'primary' }) {
+  const { data } = await calendar.events.insert({
+    calendarId,
+    requestBody: {
+      summary,
+      description: description || 'Auto-scheduled by Tracker',
+      start: { dateTime: new Date(start).toISOString() },
+      end:   { dateTime: new Date(end).toISOString() },
+      colorId,
+      source: { title: 'Tracker', url: 'https://personal-task-tracker-lac.vercel.app' },
+    },
+  })
+  return data.id
+}
+
+export async function deleteGoogleEvent(calendar, eventId, calendarId = 'primary') {
+  try {
+    await calendar.events.delete({ calendarId, eventId })
+    return true
+  } catch (e) {
+    if (e?.code === 410 || e?.code === 404) return true   // already gone
+    throw e
+  }
+}
+
 // Fetch Calendly scheduled events (booked meetings) → treated as busy time.
 // Requires CALENDLY_TOKEN (personal access token) and the user's URI.
 export async function fetchCalendlyEvents({ token, minStart, maxStart }) {

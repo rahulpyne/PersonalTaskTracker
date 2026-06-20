@@ -50,7 +50,7 @@ console.log(`\n── Authorising: ${targetEmail} ──`)
 const REDIRECT = 'http://localhost:3000'
 const SCOPES   = [
   'https://www.googleapis.com/auth/gmail.modify',
-  'https://www.googleapis.com/auth/calendar.readonly',  // Calendar section (read-only, Phase 1)
+  'https://www.googleapis.com/auth/calendar.events',  // read events (sync) + write (auto-scheduled task blocks)
 ]
 
 const oauth2 = new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, REDIRECT)

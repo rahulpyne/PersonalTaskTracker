@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { fetchCalendarEvents, fetchLatestPlan } from '../lib/calendar'
+import { fetchCalendarEvents, fetchLatestPlan, fetchTaskBlocks, approveBlock, approveAllProposed } from '../lib/calendar'
 
 const DAY_MS = 86_400_000
 const DAYS   = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -27,6 +27,7 @@ const fmtTime  = (d) => d.toLocaleTimeString('en', { hour: 'numeric', minute: '2
 export default function Calendar() {
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
   const [events,    setEvents]    = useState([])
+  const [blocks,    setBlocks]    = useState([])
   const [plan,      setPlan]      = useState(null)
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState(null)
@@ -40,16 +41,28 @@ export default function Calendar() {
     setLoading(true); setError(null)
     const from = weekStart.toISOString()
     const to   = new Date(weekStart.getTime() + 7 * DAY_MS).toISOString()
-    // Independent — a missing calendar_events table shouldn't hide the fitness plan
-    const [evsRes, planRes] = await Promise.allSettled([
+    // Independent — a missing table shouldn't hide the others
+    const [evsRes, planRes, blkRes] = await Promise.allSettled([
       fetchCalendarEvents(from, to),
       fetchLatestPlan(),
+      fetchTaskBlocks(from, to),
     ])
     if (evsRes.status === 'fulfilled') setEvents(evsRes.value)
     else { setEvents([]); setError(evsRes.reason?.message || 'calendar fetch failed') }
     setPlan(planRes.status === 'fulfilled' ? planRes.value : null)
+    setBlocks(blkRes.status === 'fulfilled' ? blkRes.value : [])
     setLoading(false)
   }, [weekStart])
+
+  const onApprove = useCallback(async (id) => {
+    setBlocks(bs => bs.map(b => b.id === id ? { ...b, status: 'approved' } : b))
+    try { await approveBlock(id) } catch { load() }
+  }, [load])
+
+  const onApproveAll = useCallback(async () => {
+    setBlocks(bs => bs.map(b => b.status === 'proposed' ? { ...b, status: 'approved' } : b))
+    try { await approveAllProposed() } catch { load() }
+  }, [load])
 
   useEffect(() => { load() }, [load])
 
@@ -61,15 +74,21 @@ export default function Calendar() {
   const timed  = parsed.filter(e => !e.all_day)
   const allDay = parsed.filter(e => e.all_day)
 
-  // Hour window: fit to events, clamped to a sensible default
+  const parsedBlocks = useMemo(() => blocks.map(b => ({
+    ...b, _start: new Date(b.start_at), _end: new Date(b.end_at),
+  })), [blocks])
+
+  const proposedCount = blocks.filter(b => b.status === 'proposed').length
+
+  // Hour window: fit to events + blocks, clamped to a sensible default
   const [hStart, hEnd] = useMemo(() => {
     let lo = 7, hi = 21
-    for (const e of timed) {
+    for (const e of [...timed, ...parsedBlocks]) {
       lo = Math.min(lo, e._start.getHours())
       hi = Math.max(hi, e._end.getHours() + (e._end.getMinutes() > 0 ? 1 : 0))
     }
     return [Math.max(0, Math.min(lo, 7)), Math.min(24, Math.max(hi, 21))]
-  }, [timed])
+  }, [timed, parsedBlocks])
 
   const hours = Array.from({ length: hEnd - hStart }, (_, i) => hStart + i)
   const ROW_H = 52
@@ -97,6 +116,13 @@ export default function Calendar() {
           <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-3)', marginTop: 4 }}>{monthLabel}</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {proposedCount > 0 && (
+            <button onClick={onApproveAll} style={{
+              fontFamily: 'var(--mono)', fontSize: 12, padding: '6px 12px', borderRadius: 8,
+              border: '1px solid var(--good)', background: 'color-mix(in oklch, var(--good) 14%, transparent)',
+              color: 'var(--ink)', cursor: 'pointer', fontWeight: 600,
+            }}>✓ Approve {proposedCount} block{proposedCount !== 1 ? 's' : ''}</button>
+          )}
           <NavBtn onClick={() => setWeekStart(d => new Date(d.getTime() - 7 * DAY_MS))}>‹</NavBtn>
           <NavBtn onClick={() => setWeekStart(mondayOf(new Date()))}>Today</NavBtn>
           <NavBtn onClick={() => setWeekStart(d => new Date(d.getTime() + 7 * DAY_MS))}>›</NavBtn>
@@ -110,6 +136,9 @@ export default function Calendar() {
             <span style={{ width: 10, height: 10, borderRadius: 3, background: s.bar }} /> {s.label}
           </span>
         ))}
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 3, border: '1px dashed var(--ink-3)' }} /> Task block (▸ = auto-scheduled)
+        </span>
       </div>
 
       {error && (/calendar_events|schema cache/i.test(error)
@@ -195,6 +224,31 @@ export default function Calendar() {
                     }}>
                     <div style={{ fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.title || '(busy)'}</div>
                     {h > 30 && <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)' }}>{fmtTime(e._start)}</div>}
+                  </div>
+                )
+              })}
+              {/* auto-scheduled task blocks */}
+              {parsedBlocks.filter(b => sameDay(b._start, d)).map(b => {
+                const top = ((minsInto(b._start) - hStart * 60) / ((hEnd - hStart) * 60)) * gridH
+                const h   = Math.max(18, ((b._end - b._start) / 60000 / ((hEnd - hStart) * 60)) * gridH)
+                const col = b.category === 'work' ? 'oklch(58% 0.13 250)' : 'oklch(62% 0.13 160)'
+                const isProposed = b.status === 'proposed'
+                return (
+                  <div key={b.id} title={`${b.title} · ${fmtTime(b._start)}–${fmtTime(b._end)} · ${b.status}`}
+                    style={{
+                      position: 'absolute', top, height: h - 2, right: 2, left: '38%',
+                      background: `color-mix(in oklch, ${col} 14%, transparent)`,
+                      border: `1px ${isProposed ? 'dashed' : 'solid'} ${col}`, borderRadius: 5,
+                      padding: '2px 5px', overflow: 'hidden', zIndex: 2, fontSize: 10.5, lineHeight: 1.2,
+                    }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                      <span style={{ fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>▸ {b.title}</span>
+                      {isProposed && (
+                        <button onClick={() => onApprove(b.id)} title="Approve → add to Google Calendar"
+                          style={{ border: 0, background: col, color: '#fff', borderRadius: 4, fontSize: 9, lineHeight: 1, padding: '2px 4px', cursor: 'pointer', flexShrink: 0 }}>✓</button>
+                      )}
+                    </div>
+                    {h > 28 && <div style={{ fontFamily: 'var(--mono)', fontSize: 8.5, color: 'var(--ink-3)' }}>{isProposed ? 'proposed' : b.status === 'approved' ? 'approved' : 'scheduled'}</div>}
                   </div>
                 )
               })}

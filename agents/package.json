@@ -16,6 +16,9 @@
     "scrape-lifts:backfill": "node fitness/strava-lift-scraper.js --days=365 --skip-existing",
     "sync-calendar": "node fitness/calendar-sync.js",
     "sync-calendar:dry": "node fitness/calendar-sync.js --dry-run",
+    "schedule": "node fitness/task-scheduler.js",
+    "schedule:dry": "node fitness/task-scheduler.js --dry-run",
+    "schedule:push": "node fitness/task-scheduler.js --push",
     "strava-mcp":       "node fitness/strava-mcp.js"
   },
   "dependencies": {

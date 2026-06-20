@@ -26,6 +26,7 @@ import { run as pullStrava }       from './fitness/strava-puller.js'
 import { run as scrapeLifts }      from './fitness/strava-lift-scraper.js'
 import { run as generateInsights } from './fitness/insight-generator.js'
 import { run as syncCalendar }      from './fitness/calendar-sync.js'
+import { run as scheduleTasks }     from './fitness/task-scheduler.js'
 
 const __dir          = path.dirname(fileURLToPath(import.meta.url))
 const ACCOUNTS_FILE  = path.join(__dir, 'accounts.json')
@@ -150,6 +151,13 @@ async function pipeline() {
     await syncCalendar(supabase)
   } catch (e) {
     warn('CalendarSync failed:', e.message)
+  }
+
+  // Phase D4: auto-schedule tasks into free slots, push approved blocks to GCal
+  try {
+    await scheduleTasks(supabase, { push: true })
+  } catch (e) {
+    warn('TaskScheduler failed:', e.message)
   }
 
   // Phase E: generate fitness insights (Sundays only — weekly)
