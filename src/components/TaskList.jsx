@@ -59,10 +59,17 @@ const RECUR_PERIODS     = { daily:1, weekly:7, monthly:30 }
 const RECUR_COLORS      = [null, 'oklch(79% 0.16 72)', 'oklch(72% 0.20 50)', 'oklch(65% 0.24 28)']
 const RECUR_MISS_LABELS = ['', 'missed once', 'missed twice', 'missed 3+×']
 
+// Parse a 'YYYY-MM-DD' completion date as LOCAL midnight so period math and
+// the "last …" label line up with the user's calendar day (not UTC).
+function completionMs(s) {
+  const [y, m, d] = s.split('-').map(Number)
+  return new Date(y, m - 1, d).getTime()
+}
+
 function _lastCompletion(task) {
   const ms = RECUR_PERIODS[task.schedule] * 86400000
   if (task.completions?.length)
-    return Math.max(...task.completions.map(c => new Date(c).getTime()))
+    return Math.max(...task.completions.map(completionMs))
   return new Date(task.createdAt).getTime() - ms
 }
 
@@ -506,7 +513,7 @@ function RecurringTaskItem({ task, onComplete, onRemove }) {
     : null
   const ms            = RECUR_PERIODS[task.schedule] * 86400000
   const periodStart   = nextDue.getTime() - ms
-  const doneThisPeriod = (task.completions || []).some(c => new Date(c).getTime() >= periodStart)
+  const doneThisPeriod = (task.completions || []).some(c => completionMs(c) >= periodStart)
   const isOverdue     = !doneThisPeriod && Date.now() > nextDue.getTime()
 
   return (
@@ -545,7 +552,7 @@ function RecurringTaskItem({ task, onComplete, onRemove }) {
               ? <span style={{ color: color || 'var(--warn)' }}>· overdue since {prettyDate(nextDue.getTime())}</span>
               : <span>· due {prettyDate(nextDue.getTime())}</span>
           }
-          {lastDone && <span>· last {prettyDate(new Date(lastDone).getTime())}</span>}
+          {lastDone && <span>· last {prettyDate(completionMs(lastDone))}</span>}
         </div>
       </div>
 
