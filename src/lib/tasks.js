@@ -131,6 +131,51 @@ export async function generateSubtasks({ taskId, taskTitle, taskCategory, taskNo
   return subtasks   // already persisted by the Edge Function
 }
 
+// ── Recurring tasks — backend-backed, syncs across devices ────────────────────
+
+function mapRecurring(r) {
+  return {
+    id:          r.id,
+    title:       r.title,
+    schedule:    r.schedule,
+    createdAt:   r.created_at,
+    completions: r.completions || [],
+  }
+}
+
+export async function fetchRecurring() {
+  const { data, error } = await supabase
+    .from('recurring_tasks')
+    .select('*')
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return (data || []).map(mapRecurring)
+}
+
+export async function createRecurring({ title, schedule }) {
+  const { data, error } = await supabase
+    .from('recurring_tasks')
+    .insert({ title, schedule })
+    .select()
+    .single()
+  if (error) throw error
+  return mapRecurring(data)
+}
+
+// completions: the full new array of 'YYYY-MM-DD' date strings
+export async function updateRecurringCompletions(id, completions) {
+  const { error } = await supabase
+    .from('recurring_tasks')
+    .update({ completions })
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function deleteRecurring(id) {
+  const { error } = await supabase.from('recurring_tasks').delete().eq('id', id)
+  if (error) throw error
+}
+
 // ── Realtime ──────────────────────────────────────────────────────────────────
 
 export function subscribeToTasks(onChange) {

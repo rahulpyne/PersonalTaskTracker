@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { IconCheck, IconPencil, IconTrash, IconPlus } from './Icons'
-import { toggleSubtask, generateSubtasks } from '../lib/tasks'
+import { toggleSubtask, generateSubtasks, fetchRecurring, createRecurring, updateRecurringCompletions, deleteRecurring } from '../lib/tasks'
 import { startRecording, stopRecording, transcribeAudio, isVoiceSupported } from '../lib/voice'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -80,33 +80,38 @@ function getNextDue(task) {
   return new Date(_lastCompletion(task) + ms)
 }
 
-// Seed with "Call mom" weekly task — created 8 days ago so it shows as missed-once on first load
-const SEED_RECURRING = [
-  { id:'call-mom', title:'Call mom', schedule:'weekly',
-    createdAt: new Date(Date.now() - 8 * 86400000).toISOString(), completions:[] }
-]
-
+// Recurring tasks now live in Supabase (recurring_tasks table) so they sync
+// across devices and completions persist. No more hardcoded seed.
 function useRecurring() {
-  const [tasks, setTasks] = useState(() => {
-    try {
-      const s = JSON.parse(localStorage.getItem('tracker:recurring'))
-      if (Array.isArray(s) && s.length) return s
-    } catch {}
-    return SEED_RECURRING
-  })
-  useEffect(() => { localStorage.setItem('tracker:recurring', JSON.stringify(tasks)) }, [tasks])
+  const [tasks, setTasks] = useState([])
+
+  useEffect(() => {
+    fetchRecurring().then(setTasks).catch(console.error)
+  }, [])
 
   const complete = useCallback(id => {
     const today = new Date().toISOString().slice(0, 10)
-    setTasks(ts => ts.map(t => t.id === id
-      ? { ...t, completions: [...(t.completions || []).filter(c => c !== today), today] }
-      : t))
+    setTasks(ts => {
+      const target = ts.find(t => t.id === id)
+      if (!target) return ts
+      const completions = [...(target.completions || []).filter(c => c !== today), today]
+      updateRecurringCompletions(id, completions).catch(console.error)
+      return ts.map(t => t.id === id ? { ...t, completions } : t)
+    })
   }, [])
+
   const add = useCallback(({ title, schedule }) => {
     if (!title.trim()) return
-    setTasks(ts => [...ts, { id:'rec-'+Date.now(), title:title.trim(), schedule, createdAt:new Date().toISOString(), completions:[] }])
+    createRecurring({ title: title.trim(), schedule })
+      .then(row => setTasks(ts => [...ts, row]))
+      .catch(console.error)
   }, [])
-  const remove = useCallback(id => setTasks(ts => ts.filter(t => t.id !== id)), [])
+
+  const remove = useCallback(id => {
+    setTasks(ts => ts.filter(t => t.id !== id))
+    deleteRecurring(id).catch(console.error)
+  }, [])
+
   return { tasks, complete, add, remove }
 }
 
