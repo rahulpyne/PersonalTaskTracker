@@ -1,4 +1,4 @@
-import { IconList, IconBars, CatIcon, Flame, IconNote, IconGraph } from './Icons'
+import { IconList, IconBars, CatIcon, Flame, IconNote, IconGraph, IconCalendar } from './Icons'
 import { computeStreak } from '../lib/history'
 
 function Logo({ size = 38 }) {
@@ -68,6 +68,9 @@ export default function Sidebar({ view, setView, cat, setCat, tasks, history, no
         </button>
         <button className={`side-item ${view === 'graph' ? 'active' : ''}`} onClick={() => setView('graph')}>
           <IconGraph size={15} /> Graph
+        </button>
+        <button className={`side-item ${view === 'calendar' ? 'active' : ''}`} onClick={() => setView('calendar')}>
+          <IconCalendar size={15} /> Calendar
         </button>
       </div>
 

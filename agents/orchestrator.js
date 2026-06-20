@@ -25,6 +25,7 @@ import { run as pruneData }        from './pruner.js'
 import { run as pullStrava }       from './fitness/strava-puller.js'
 import { run as scrapeLifts }      from './fitness/strava-lift-scraper.js'
 import { run as generateInsights } from './fitness/insight-generator.js'
+import { run as syncCalendar }      from './fitness/calendar-sync.js'
 
 const __dir          = path.dirname(fileURLToPath(import.meta.url))
 const ACCOUNTS_FILE  = path.join(__dir, 'accounts.json')
@@ -142,6 +143,13 @@ async function pipeline() {
     await scrapeLifts(supabase, { lookbackDays: stravaLookback })
   } catch (e) {
     warn('StravaLiftScraper failed:', e.message)
+  }
+
+  // Phase D3: sync Google Calendar + Calendly into calendar_events (nightly)
+  try {
+    await syncCalendar(supabase)
+  } catch (e) {
+    warn('CalendarSync failed:', e.message)
   }
 
   // Phase E: generate fitness insights (Sundays only — weekly)

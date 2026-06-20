@@ -7,6 +7,7 @@ import { IconList, IconBars, CatIcon } from './components/Icons'
 import FitnessDashboard from './pages/FitnessDashboard'
 import Notes from './pages/Notes'
 import Graph from './pages/Graph'
+import Calendar from './pages/Calendar'
 import { toUI, toDB, toDBToggle } from './lib/adapter'
 import { buildHistory } from './lib/history'
 import { fetchTasks, createTask, updateTask, deleteTask, clearCompleted, markCleared, filterCleared, fetchTaskDailyStats, recordTaskStat, subscribeToTasks } from './lib/tasks'
@@ -272,6 +273,10 @@ export default function App() {
           <div className="scroll graph-scroll" style={{ overflow: 'hidden', padding: 0 }}>
             <Graph onNoteClick={(id) => { setGraphFocusId(id); setView('notes') }} />
           </div>
+        ) : view === 'calendar' ? (
+          <div className="scroll" style={{ overflow: 'auto', padding: '20px 24px' }}>
+            <Calendar />
+          </div>
         ) : (
           <div className="scroll" style={{ overflow: 'auto' }}>
             <FitnessDashboard />
@@ -295,6 +300,9 @@ export default function App() {
         </button>
         <button className={view === 'graph' ? 'active' : ''} onClick={() => setView('graph')}>
           ✦ Graph
+        </button>
+        <button className={view === 'calendar' ? 'active' : ''} onClick={() => setView('calendar')}>
+          📅 Calendar
         </button>
       </nav>
     </div>

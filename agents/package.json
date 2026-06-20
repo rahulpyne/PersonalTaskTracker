@@ -14,6 +14,8 @@
     "scrape-lifts:90": "node fitness/strava-lift-scraper.js --days=90",
     "scrape-lifts:dry": "node fitness/strava-lift-scraper.js --days=90 --dry-run",
     "scrape-lifts:backfill": "node fitness/strava-lift-scraper.js --days=365 --skip-existing",
+    "sync-calendar": "node fitness/calendar-sync.js",
+    "sync-calendar:dry": "node fitness/calendar-sync.js --dry-run",
     "strava-mcp":       "node fitness/strava-mcp.js"
   },
   "dependencies": {
