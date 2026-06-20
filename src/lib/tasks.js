@@ -67,6 +67,32 @@ export async function clearCompleted() {
   // Backend tasks remain intact so AI insight generation is never affected
 }
 
+// ── Task daily stats — persistent insight record, never deleted ───────────────
+
+export async function fetchTaskDailyStats() {
+  const cutoff = new Date()
+  cutoff.setDate(cutoff.getDate() - 371)
+  const { data, error } = await supabase
+    .from('task_daily_stats')
+    .select('date, completed, work, personal')
+    .gte('date', cutoff.toISOString().slice(0, 10))
+    .order('date', { ascending: true })
+  if (error) throw error
+  return data || []
+}
+
+// delta: +1 when completing a task, -1 when un-completing
+export async function recordTaskStat(dateISO, type, delta) {
+  const p_work     = type === 'work'     ? delta : 0
+  const p_personal = type === 'personal' ? delta : 0
+  const { error } = await supabase.rpc('upsert_task_daily_stat', {
+    p_date: dateISO,
+    p_work,
+    p_personal,
+  })
+  if (error) console.warn('recordTaskStat:', error.message)
+}
+
 // ── Subtask toggle (still a direct row update) ────────────────────────────────
 
 export async function toggleSubtask(id, done) {

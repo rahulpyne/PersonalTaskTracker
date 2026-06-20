@@ -9,13 +9,14 @@ import Notes from './pages/Notes'
 import Graph from './pages/Graph'
 import { toUI, toDB, toDBToggle } from './lib/adapter'
 import { buildHistory } from './lib/history'
-import { fetchTasks, createTask, updateTask, deleteTask, clearCompleted, markCleared, filterCleared, subscribeToTasks } from './lib/tasks'
+import { fetchTasks, createTask, updateTask, deleteTask, clearCompleted, markCleared, filterCleared, fetchTaskDailyStats, recordTaskStat, subscribeToTasks } from './lib/tasks'
 import { fetchNotes } from './lib/notes'
 
 const TODAY_LABEL = new Date().toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric' })
 
 export default function App() {
   const [dbTasks,    setDbTasks]    = useState([])
+  const [dailyStats, setDailyStats] = useState([])
   const [noteCount,  setNoteCount]  = useState(0)
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState(null)
@@ -30,10 +31,11 @@ export default function App() {
 
   // ── Load + realtime ────────────────────────────────────────────
   useEffect(() => {
-    Promise.all([fetchTasks(), fetchNotes()])
-      .then(([taskRows, noteRows]) => {
+    Promise.all([fetchTasks(), fetchNotes(), fetchTaskDailyStats()])
+      .then(([taskRows, noteRows, statsRows]) => {
         setDbTasks(filterCleared(taskRows))
         setNoteCount(noteRows.length)
+        setDailyStats(statsRows)
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
@@ -49,7 +51,7 @@ export default function App() {
   // ── Derived UI tasks ───────────────────────────────────────────
   const tasks = useMemo(() => dbTasks.map(toUI), [dbTasks])
 
-  const history = useMemo(() => buildHistory(tasks), [tasks])
+  const history = useMemo(() => buildHistory(tasks, dailyStats), [tasks, dailyStats])
 
   const counts = useMemo(() => ({
     all:      tasks.length,
@@ -72,9 +74,16 @@ export default function App() {
     if (!task) return
     const next = !task.done
     const dbFields = toDBToggle(next)
+    // Date for the stat: today when completing, or the task's existing done_at when uncompleting
+    const statDate = next
+      ? new Date().toISOString().slice(0, 10)
+      : (task.done_at || new Date().toISOString()).slice(0, 10)
     setDbTasks(ts => ts.map(t => t.id === id ? { ...t, ...dbFields } : t))
     try {
       await updateTask(id, dbFields)
+      await recordTaskStat(statDate, task.type || 'personal', next ? 1 : -1)
+      // Refresh stats in memory so heatmap/streak update immediately
+      fetchTaskDailyStats().then(setDailyStats).catch(() => {})
     } catch {
       fetchTasks().then(rows => setDbTasks(filterCleared(rows)))
     }
