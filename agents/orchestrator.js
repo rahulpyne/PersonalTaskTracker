@@ -33,10 +33,14 @@ const ACCOUNTS_FILE  = path.join(__dir, 'accounts.json')
 
 // ── Validate env ──────────────────────────────────────────────────────────────
 
-const REQUIRED = [
-  'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN',
-  'GEMINI_API_KEY', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY',
-]
+// The lightweight --calendar job only needs Supabase + Google client creds
+// (its Google token comes from accounts.json); the full pipeline also needs
+// Gmail's GOOGLE_REFRESH_TOKEN and Gemini.
+const CALENDAR_ONLY = process.argv.includes('--calendar')
+const REQUIRED = CALENDAR_ONLY
+  ? ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY']
+  : ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN',
+     'GEMINI_API_KEY', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY']
 const missing = REQUIRED.filter(k => !process.env[k])
 if (missing.length) {
   err(`Missing env vars: ${missing.join(', ')}`)
