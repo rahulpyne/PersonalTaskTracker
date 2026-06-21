@@ -5,6 +5,8 @@
   "scripts": {
     "start": "node orchestrator.js",
     "run-now": "node orchestrator.js --now",
+    "run-once": "node orchestrator.js --once",
+    "run-calendar": "node orchestrator.js --calendar",
     "run-insights": "node orchestrator.js --now --insights",
     "setup-oauth": "node setup-oauth.js",
     "setup-strava": "node fitness/strava-oauth.js",

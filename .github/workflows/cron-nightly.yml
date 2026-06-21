@@ -1,0 +1,51 @@
+name: Nightly Pipeline
+
+# Full nightly pipeline: email→tasks, prune, Strava pull + lift scraping,
+# calendar sync, task scheduling, and (Sundays) fitness insights.
+# Runs in the cloud — no dependency on any local machine.
+
+on:
+  schedule:
+    - cron: '0 8 * * *'    # ~01:00 America/Vancouver (UTC 08:00)
+  workflow_dispatch: {}
+
+concurrency:
+  group: cron-nightly
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TZ: America/Vancouver
+      GOOGLE_CLIENT_ID:     ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+      SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL:         ${{ secrets.GEMINI_MODEL }}
+      STRAVA_CLIENT_ID:     ${{ secrets.STRAVA_CLIENT_ID }}
+      STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
+      STRAVA_LOOKBACK_DAYS: ${{ secrets.STRAVA_LOOKBACK_DAYS }}
+      CALENDLY_TOKEN:       ${{ secrets.CALENDLY_TOKEN }}
+      CALENDAR_ACCOUNT:     ${{ secrets.CALENDAR_ACCOUNT }}
+      LOOKBACK_HOURS:       ${{ secrets.LOOKBACK_HOURS }}
+      RETENTION_DAYS:       ${{ secrets.RETENTION_DAYS }}
+      IMPORTANCE_THRESHOLD: ${{ secrets.IMPORTANCE_THRESHOLD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Restore accounts.json (Google refresh tokens)
+        run: printf '%s' "$ACCOUNTS_JSON" > agents/accounts.json
+        env:
+          ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
+      - name: Install deps
+        working-directory: agents
+        run: npm ci --omit=dev || npm install --omit=dev
+      - name: Run full pipeline
+        working-directory: agents
+        run: node orchestrator.js --once

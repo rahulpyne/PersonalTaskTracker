@@ -175,15 +175,31 @@ async function pipeline() {
   log('══════════════════════════════════════')
 }
 
-// ── Scheduler ─────────────────────────────────────────────────────────────────
+// ── Lightweight job: calendar sync + task scheduler only ─────────────────────
+// For a more frequent cron so approvals reach Google Calendar and missed blocks
+// rebook within hours, without re-running the heavy email/Strava/vision work.
+async function calendarOnly() {
+  log('Calendar+scheduler run: starting')
+  try { await syncCalendar(supabase) }              catch (e) { warn('CalendarSync failed:', e.message) }
+  try { await scheduleTasks(supabase, { push: true }) } catch (e) { warn('TaskScheduler failed:', e.message) }
+  log('Calendar+scheduler run: complete')
+}
+
+// ── Entry: run-once (CI/cron) vs long-lived daemon (local) ───────────────────
 
 const schedule = process.env.CRON_SCHEDULE || '0 23 * * *'
 const timezone = process.env.TIMEZONE      || 'America/Vancouver'
 
-cron.schedule(schedule, pipeline, { timezone })
-log(`Orchestrator running — schedule: "${schedule}" (${timezone})`)
-log('Run with --now to trigger immediately')
-
-if (process.argv.includes('--now')) {
-  pipeline()
+if (process.argv.includes('--once') || process.argv.includes('--calendar')) {
+  // One-shot mode — runs the job, then exits (for GitHub Actions / any hosted cron)
+  const job = process.argv.includes('--calendar') ? calendarOnly : pipeline
+  job()
+    .then(() => { log('One-shot run complete — exiting'); process.exit(0) })
+    .catch(e => { err('One-shot run failed:', e.message); process.exit(1) })
+} else {
+  // Long-lived daemon (local machine)
+  cron.schedule(schedule, pipeline, { timezone })
+  log(`Orchestrator running — schedule: "${schedule}" (${timezone})`)
+  log('Run with --now to trigger immediately, or --once / --calendar for one-shot')
+  if (process.argv.includes('--now')) pipeline()
 }
