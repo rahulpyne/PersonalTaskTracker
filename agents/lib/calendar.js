@@ -23,6 +23,9 @@ export async function fetchGoogleEvents(calendar, { timeMin, timeMax, calendarId
     })
     for (const ev of data.items || []) {
       if (ev.status === 'cancelled') continue
+      // Skip our own auto-scheduled task blocks (they live in task_blocks already)
+      if (ev.extendedProperties?.private?.trackerBlock === 'true') continue
+      if ((ev.summary || '').startsWith('▸ ')) continue
       const allDay = !!ev.start?.date
       const start  = ev.start?.dateTime || ev.start?.date
       const end    = ev.end?.dateTime   || ev.end?.date
@@ -59,6 +62,7 @@ export async function createGoogleEvent(calendar, { summary, description, start,
       end:   { dateTime: new Date(end).toISOString() },
       colorId,
       source: { title: 'Tracker', url: 'https://personal-task-tracker-lac.vercel.app' },
+      extendedProperties: { private: { trackerBlock: 'true' } },
     },
   })
   return data.id
