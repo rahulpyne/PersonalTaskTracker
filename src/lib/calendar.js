@@ -22,7 +22,8 @@ export async function fetchTaskBlocks(fromISO, toISO) {
     .select('id,task_id,title,category,prio,duration_mins,start_at,end_at,status')
     .lt('start_at', toISO)
     .gt('end_at', fromISO)
-    .in('status', ['proposed', 'approved', 'confirmed'])
+    .in('status', ['proposed', 'approved', 'confirmed', 'done'])
+    .or('sync_state.is.null,sync_state.neq.pending_delete')   // hide blocks queued for deletion
     .order('start_at', { ascending: true })
   if (error) throw error
   return data || []
@@ -37,6 +38,56 @@ export async function approveBlock(id) {
 export async function approveAllProposed() {
   const { error } = await supabase.from('task_blocks').update({ status: 'approved' }).eq('status', 'proposed')
   if (error) throw error
+}
+
+// ── Manual block editing — instant in Supabase, mirrored to Google Calendar by
+//    the cron via the sync_state flag (pending_create|pending_update|pending_delete) ──
+
+// Mark a block (and its underlying task) complete
+export async function completeBlock(block) {
+  const ops = [supabase.from('task_blocks').update({ status: 'done' }).eq('id', block.id)]
+  if (block.task_id) {
+    const today = new Date().toISOString().slice(0, 10)
+    ops.push(supabase.from('tasks').update({ done: true, done_at: new Date().toISOString() }).eq('id', block.task_id))
+    ops.push(supabase.rpc('upsert_task_daily_stat', {
+      p_date: today,
+      p_work:     block.category === 'work' ? 1 : 0,
+      p_personal: block.category === 'work' ? 0 : 1,
+    }))
+  }
+  const err = (await Promise.all(ops)).find(r => r?.error)?.error
+  if (err) throw err
+}
+
+// Move a block to a new time (Google event patched by cron if already confirmed)
+export async function rescheduleBlock(block, startISO, endISO) {
+  const sync_state = block.gcal_event_id ? 'pending_update' : 'synced'
+  const duration_mins = Math.round((new Date(endISO) - new Date(startISO)) / 60000)
+  const { error } = await supabase.from('task_blocks')
+    .update({ start_at: startISO, end_at: endISO, duration_mins, sync_state }).eq('id', block.id)
+  if (error) throw error
+}
+
+// Delete a block — soft-flag for cron to remove the Google event, else hard delete
+export async function removeBlock(block) {
+  if (block.gcal_event_id) {
+    const { error } = await supabase.from('task_blocks').update({ sync_state: 'pending_delete' }).eq('id', block.id)
+    if (error) throw error
+  } else {
+    const { error } = await supabase.from('task_blocks').delete().eq('id', block.id)
+    if (error) throw error
+  }
+}
+
+// Add a manual block (not tied to a task) → cron creates the Google event
+export async function createBlock({ title, category, startISO, endISO }) {
+  const duration_mins = Math.round((new Date(endISO) - new Date(startISO)) / 60000)
+  const { data, error } = await supabase.from('task_blocks').insert({
+    title, category, prio: 'med', duration_mins,
+    start_at: startISO, end_at: endISO, status: 'confirmed', sync_state: 'pending_create',
+  }).select().single()
+  if (error) throw error
+  return data
 }
 
 // Latest weekly fitness plan ({ plan: { monday: {type,durationMins,notes}, ... } })

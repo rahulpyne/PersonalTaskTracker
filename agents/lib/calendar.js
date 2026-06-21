@@ -68,6 +68,16 @@ export async function createGoogleEvent(calendar, { summary, description, start,
   return data.id
 }
 
+// Patch an existing event's time (and optionally title)
+export async function updateGoogleEvent(calendar, eventId, { start, end, summary, calendarId = 'primary' }) {
+  const requestBody = {}
+  if (start) requestBody.start = { dateTime: new Date(start).toISOString() }
+  if (end)   requestBody.end   = { dateTime: new Date(end).toISOString() }
+  if (summary) requestBody.summary = summary
+  const { data } = await calendar.events.patch({ calendarId, eventId, requestBody })
+  return data.id
+}
+
 export async function deleteGoogleEvent(calendar, eventId, calendarId = 'primary') {
   try {
     await calendar.events.delete({ calendarId, eventId })

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { fetchCalendarEvents, fetchLatestPlan, fetchTaskBlocks, approveBlock, approveAllProposed } from '../lib/calendar'
+import { fetchCalendarEvents, fetchLatestPlan, fetchTaskBlocks, approveBlock, approveAllProposed,
+         completeBlock, rescheduleBlock, removeBlock, createBlock } from '../lib/calendar'
 
 const DAY_MS = 86_400_000
 const DAYS   = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -64,6 +65,27 @@ export default function Calendar() {
     try { await approveAllProposed() } catch { load() }
   }, [load])
 
+  const [editing, setEditing] = useState(null)   // block being edited, or { add: true }
+
+  const onComplete = useCallback(async (block) => {
+    setEditing(null)
+    setBlocks(bs => bs.map(b => b.id === block.id ? { ...b, status: 'done' } : b))
+    try { await completeBlock(block) } catch (e) { alert('Could not complete: ' + e.message); load() }
+  }, [load])
+
+  const onDelete = useCallback(async (block) => {
+    setEditing(null)
+    setBlocks(bs => bs.filter(b => b.id !== block.id))
+    try { await removeBlock(block) } catch (e) { alert('Could not delete: ' + e.message); load() }
+  }, [load])
+
+  const onSaveEdit = useCallback(async (block, { title, category, startISO, endISO }) => {
+    setEditing(null)
+    if (block) { try { await rescheduleBlock(block, startISO, endISO) } catch (e) { alert(e.message) } }
+    else       { try { await createBlock({ title, category, startISO, endISO }) } catch (e) { alert(e.message) } }
+    load()
+  }, [load])
+
   useEffect(() => { load() }, [load])
 
   // Split timed vs all-day, parse dates once
@@ -123,11 +145,23 @@ export default function Calendar() {
               color: 'var(--ink)', cursor: 'pointer', fontWeight: 600,
             }}>✓ Approve {proposedCount} block{proposedCount !== 1 ? 's' : ''}</button>
           )}
+          <NavBtn onClick={() => setEditing({ add: true })}>+ Add block</NavBtn>
           <NavBtn onClick={() => setWeekStart(d => new Date(d.getTime() - 7 * DAY_MS))}>‹</NavBtn>
           <NavBtn onClick={() => setWeekStart(mondayOf(new Date()))}>Today</NavBtn>
           <NavBtn onClick={() => setWeekStart(d => new Date(d.getTime() + 7 * DAY_MS))}>›</NavBtn>
         </div>
       </div>
+
+      {editing && (
+        <BlockModal
+          block={editing.add ? null : editing}
+          defaultDate={weekDates[0]}
+          onClose={() => setEditing(null)}
+          onSave={onSaveEdit}
+          onComplete={onComplete}
+          onDelete={onDelete}
+        />
+      )}
 
       {/* ── Legend ── */}
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 14, fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>
@@ -233,22 +267,24 @@ export default function Calendar() {
                 const h   = Math.max(18, ((b._end - b._start) / 60000 / ((hEnd - hStart) * 60)) * gridH)
                 const col = b.category === 'work' ? 'oklch(58% 0.13 250)' : 'oklch(62% 0.13 160)'
                 const isProposed = b.status === 'proposed'
+                const isDone = b.status === 'done'
                 return (
-                  <div key={b.id} title={`${b.title} · ${fmtTime(b._start)}–${fmtTime(b._end)} · ${b.status}`}
+                  <div key={b.id} title={`${b.title} · ${fmtTime(b._start)}–${fmtTime(b._end)} · ${b.status} · click to edit`}
+                    onClick={() => setEditing(b)}
                     style={{
                       position: 'absolute', top, height: h - 2, right: 2, left: '38%',
-                      background: `color-mix(in oklch, ${col} 14%, transparent)`,
-                      border: `1px ${isProposed ? 'dashed' : 'solid'} ${col}`, borderRadius: 5,
-                      padding: '2px 5px', overflow: 'hidden', zIndex: 2, fontSize: 10.5, lineHeight: 1.2,
+                      background: `color-mix(in oklch, ${col} ${isDone ? 6 : 14}%, transparent)`,
+                      border: `1px ${isProposed ? 'dashed' : 'solid'} ${col}`, borderRadius: 5, opacity: isDone ? 0.6 : 1,
+                      padding: '2px 5px', overflow: 'hidden', zIndex: 2, fontSize: 10.5, lineHeight: 1.2, cursor: 'pointer',
                     }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                      <span style={{ fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>▸ {b.title}</span>
+                      <span style={{ fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, textDecoration: isDone ? 'line-through' : 'none' }}>{isDone ? '✓' : '▸'} {b.title}</span>
                       {isProposed && (
-                        <button onClick={() => onApprove(b.id)} title="Approve → add to Google Calendar"
+                        <button onClick={(ev) => { ev.stopPropagation(); onApprove(b.id) }} title="Approve → add to Google Calendar"
                           style={{ border: 0, background: col, color: '#fff', borderRadius: 4, fontSize: 9, lineHeight: 1, padding: '2px 4px', cursor: 'pointer', flexShrink: 0 }}>✓</button>
                       )}
                     </div>
-                    {h > 28 && <div style={{ fontFamily: 'var(--mono)', fontSize: 8.5, color: 'var(--ink-3)' }}>{isProposed ? 'proposed' : b.status === 'approved' ? 'approved' : 'scheduled'}</div>}
+                    {h > 28 && <div style={{ fontFamily: 'var(--mono)', fontSize: 8.5, color: 'var(--ink-3)' }}>{isDone ? 'done' : isProposed ? 'proposed' : b.status === 'approved' ? 'approved' : 'scheduled'}</div>}
                   </div>
                 )
               })}
@@ -304,5 +340,78 @@ function Banner({ children }) {
       background: 'var(--bg-2)', border: '1px solid var(--line)', borderRadius: 10,
       padding: '10px 14px', marginBottom: 14, fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5,
     }}>{children}</div>
+  )
+}
+
+// Add (block=null) or edit an existing block. Local time in/out.
+function BlockModal({ block, defaultDate, onClose, onSave, onComplete, onDelete }) {
+  const init = block ? new Date(block.start_at) : (defaultDate ? new Date(defaultDate) : new Date())
+  if (!block) init.setHours(9, 0, 0, 0)
+  const initDur = block
+    ? Math.round((new Date(block.end_at) - new Date(block.start_at)) / 60000)
+    : 30
+  const pad = (n) => String(n).padStart(2, '0')
+
+  const [title, setTitle]       = useState(block?.title || '')
+  const [category, setCategory] = useState(block?.category || 'personal')
+  const [date, setDate]         = useState(`${init.getFullYear()}-${pad(init.getMonth() + 1)}-${pad(init.getDate())}`)
+  const [time, setTime]         = useState(`${pad(init.getHours())}:${pad(init.getMinutes())}`)
+  const [dur, setDur]           = useState(initDur)
+  const isDone = block?.status === 'done'
+
+  const submit = () => {
+    if (!title.trim()) return
+    const [y, m, d] = date.split('-').map(Number)
+    const [hh, mm]  = time.split(':').map(Number)
+    const start = new Date(y, m - 1, d, hh, mm, 0, 0)
+    const end   = new Date(start.getTime() + dur * 60000)
+    onSave(block, { title: title.trim(), category, startISO: start.toISOString(), endISO: end.toISOString() })
+  }
+
+  const field = { width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg)', color: 'var(--ink)', fontSize: 13, fontFamily: 'inherit' }
+  const label = { fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: 4, display: 'block' }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 14, padding: 22, width: 380, maxWidth: '90vw', boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>{block ? 'Edit block' : 'Add block'}</h2>
+          <button onClick={onClose} style={{ border: 0, background: 'transparent', fontSize: 20, color: 'var(--ink-3)', cursor: 'pointer', lineHeight: 1 }}>×</button>
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <label style={label}>Title</label>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What is this block for?" style={field} autoFocus={!block} />
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <label style={label}>Category</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {['work', 'personal'].map(c => (
+              <button key={c} onClick={() => setCategory(c)} style={{
+                flex: 1, padding: '7px', borderRadius: 8, cursor: 'pointer', fontSize: 12, textTransform: 'capitalize',
+                border: `1px solid ${category === c ? 'var(--ink)' : 'var(--line)'}`,
+                background: category === c ? 'var(--ink)' : 'transparent', color: category === c ? 'var(--bg)' : 'var(--ink-2)',
+              }}>{c}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 18 }}>
+          <div style={{ flex: 1.4 }}><label style={label}>Date</label><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={field} /></div>
+          <div style={{ flex: 1 }}><label style={label}>Start</label><input type="time" value={time} onChange={(e) => setTime(e.target.value)} style={field} /></div>
+          <div style={{ flex: 0.9 }}><label style={label}>Mins</label><input type="number" min="5" step="5" value={dur} onChange={(e) => setDur(+e.target.value)} style={field} /></div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {block && !isDone && (
+            <button onClick={() => onComplete(block)} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--good)', background: 'color-mix(in oklch, var(--good) 14%, transparent)', color: 'var(--ink)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>✓ Done</button>
+          )}
+          {block && (
+            <button onClick={() => onDelete(block)} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--bad)', background: 'transparent', color: 'var(--bad)', cursor: 'pointer', fontSize: 12 }}>Delete</button>
+          )}
+          <div style={{ flex: 1 }} />
+          <button onClick={submit} style={{ padding: '8px 16px', borderRadius: 8, border: 0, background: 'var(--ink)', color: 'var(--bg)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>{block ? 'Save' : 'Add'}</button>
+        </div>
+      </div>
+    </div>
   )
 }

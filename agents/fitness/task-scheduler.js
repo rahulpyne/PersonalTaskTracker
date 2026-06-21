@@ -18,7 +18,7 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { schedule } from '../lib/scheduler.js'
-import { createCalendarClient, createGoogleEvent, deleteGoogleEvent } from '../lib/calendar.js'
+import { createCalendarClient, createGoogleEvent, updateGoogleEvent, deleteGoogleEvent } from '../lib/calendar.js'
 import { log, warn } from '../lib/logger.js'
 
 const HORIZON_DAYS  = 14
@@ -57,6 +57,35 @@ export async function run(supabase, opts = {}) {
 
   const { data: blocks = [] } = await supabase
     .from('task_blocks').select('*')
+
+  // ── 0. Mirror manual edits (sync_state) to Google Calendar ────────────────
+  if (calendar) {
+    for (const b of blocks.filter(b => b.sync_state && b.sync_state !== 'synced')) {
+      try {
+        if (b.sync_state === 'pending_delete') {
+          if (b.gcal_event_id) await deleteGoogleEvent(calendar, b.gcal_event_id)
+          await supabase.from('task_blocks').delete().eq('id', b.id)
+          log(`TaskScheduler: deleted "${b.title}" (manual)`)
+        } else if (b.sync_state === 'pending_create') {
+          const eventId = await createGoogleEvent(calendar, {
+            summary: `▸ ${b.title}`, description: 'Manually added block.',
+            start: b.start_at, end: b.end_at,
+          })
+          await supabase.from('task_blocks')
+            .update({ gcal_event_id: eventId, sync_state: 'synced', status: 'confirmed' }).eq('id', b.id)
+          b.gcal_event_id = eventId; b.sync_state = 'synced'
+          log(`TaskScheduler: created "${b.title}" → GCal ${eventId}`)
+        } else if (b.sync_state === 'pending_update') {
+          if (b.gcal_event_id) {
+            await updateGoogleEvent(calendar, b.gcal_event_id, { start: b.start_at, end: b.end_at })
+          }
+          await supabase.from('task_blocks').update({ sync_state: 'synced' }).eq('id', b.id)
+          b.sync_state = 'synced'
+          log(`TaskScheduler: rescheduled "${b.title}" (manual)`)
+        }
+      } catch (e) { warn(`TaskScheduler: sync ${b.sync_state} failed for "${b.title}" — ${e.message}`) }
+    }
+  }
 
   // ── 1. Push approved → Google Calendar → confirmed ────────────────────────
   if (push && calendar) {
