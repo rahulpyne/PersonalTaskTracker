@@ -406,7 +406,7 @@ function thisWeekStats(acts,metrics){
   const prActs=acts.filter(a=>{const t=new Date(a.started_at);return t>=monPrev&&t<monThis})
 
   const sumDist=arr=>+(arr.reduce((s,a)=>s+(a.distance_m||0),0)/1000).toFixed(1)
-  const countDays=arr=>new Set(arr.map(a=>a.started_at.slice(0,10))).size
+  const countDays=arr=>new Set(arr.map(a=>localDateStr(a.started_at))).size
 
   const avgMet=(arr,k,dec=1)=>{
     const v=arr.filter(d=>d[k]!=null)
@@ -471,7 +471,7 @@ function estimateCals(act){
 function heatmapData(acts){
   const DAYS=26*7,byDay={}
   acts.forEach(a=>{
-    const k=a.started_at.slice(0,10)
+    const k=localDateStr(a.started_at)
     if(!byDay[k])byDay[k]={cals:0,mins:0,acts:[]}
     byDay[k].cals+=(a.calories||estimateCals(a))
     byDay[k].mins+=(a.duration_secs||0)/60
@@ -480,25 +480,25 @@ function heatmapData(acts){
   const today=new Date();today.setHours(0,0,0,0)
   return Array.from({length:DAYS},(_,i)=>{
     const d=new Date(today);d.setDate(d.getDate()-(DAYS-1-i));d.setHours(0,0,0,0)
-    const k=d.toISOString().slice(0,10)
+    const k=localDateStr(d)
     return{date:k,dateObj:d,...(byDay[k]||{cals:0,mins:0,acts:[]})}
   })
 }
 
 function computeStreak(acts){
   if(!acts.length) return {days:0,weeks:0}
-  const activeDays=new Set(acts.map(a=>a.started_at.slice(0,10)))
+  const activeDays=new Set(acts.map(a=>localDateStr(a.started_at)))
   const today=new Date();today.setHours(0,0,0,0)
 
   // ── Daily streak ──────────────────────────────────────────────────────────
-  const todayKey=today.toISOString().slice(0,10)
+  const todayKey=localDateStr(today)
   let dd=new Date(today),dayStreak=0
   if(!activeDays.has(todayKey)) dd.setDate(dd.getDate()-1)
-  while(activeDays.has(dd.toISOString().slice(0,10))){dayStreak++;dd.setDate(dd.getDate()-1)}
+  while(activeDays.has(localDateStr(dd))){dayStreak++;dd.setDate(dd.getDate()-1)}
 
   // ── Weekly streak (matches Strava: consecutive Mon→Sun weeks with ≥1 act) ─
   const weekMonday=d=>{const x=new Date(d);x.setHours(0,0,0,0);const dow=x.getDay()===0?6:x.getDay()-1;x.setDate(x.getDate()-dow);return x}
-  const weekHasActivity=mon=>{for(let i=0;i<7;i++){const x=new Date(mon);x.setDate(x.getDate()+i);if(activeDays.has(x.toISOString().slice(0,10)))return true}return false}
+  const weekHasActivity=mon=>{for(let i=0;i<7;i++){const x=new Date(mon);x.setDate(x.getDate()+i);if(activeDays.has(localDateStr(x)))return true}return false}
   // Strava counts completed weeks + current week only if Sunday has passed.
   // Practically: always start from the most-recent fully-elapsed week,
   // then extend forward by 1 if the current week already has an activity.
@@ -528,7 +528,7 @@ function computeFitnessTrend(acts, metrics, totalDays=90){
   const restMap={}; metrics.forEach(m=>{ if(m.resting_hr>0) restMap[m.date]=m.resting_hr })
   const loadByDate={}
   acts.forEach(a=>{
-    const date=a.started_at?.slice(0,10); if(!date) return
+    const date=a.started_at?localDateStr(a.started_at):null; if(!date) return
     loadByDate[date]=(loadByDate[date]||0)+estimateLoad(a, restMap[date]||60)
   })
   const CTL_K=1/42, ATL_K=1/7; const now=new Date(); let ctl=0,atl=0
@@ -1092,7 +1092,7 @@ function RouteMap({routes}){
   const fitCoords=useMemo(()=>allDecoded.flatMap(r=>r.coords),[allDecoded])
 
   // Fallback centre: Pacific Northwest. FitBounds overrides this once data loads.
-  const PNW = [47.85, -122.10]
+  const PNW = [49.258, -123.135]  // Vancouver, BC
 
   const gis=useMemo(()=>computeGIS(routes),[routes])
 
@@ -1132,7 +1132,7 @@ function RouteMap({routes}){
           <div style={{position:'absolute',bottom:12,left:12,zIndex:1000,fontFamily:'var(--fd-mono)',fontSize:10,color:'rgba(255,255,255,0.5)',background:'rgba(14,12,10,0.75)',backdropFilter:'blur(6px)',padding:'4px 10px',borderRadius:999,border:'1px solid rgba(255,255,255,0.08)'}}>
             {filtered.length} route{filtered.length!==1?'s':''} shown
           </div>
-          <MapContainer center={PNW} zoom={9} style={{height:'100%',width:'100%',background:'#0e0c0a'}}
+          <MapContainer center={PNW} zoom={12} style={{height:'100%',width:'100%',background:'#0e0c0a'}}
             zoomControl={true} attributionControl={false}>
             <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
               attribution="© OpenStreetMap contributors © CARTO" maxZoom={19}/>
