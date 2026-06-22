@@ -35,6 +35,35 @@ function resolveGoogleToken(explicit) {
   return process.env.GOOGLE_REFRESH_TOKEN
 }
 
+const PLAN_DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+const localDateStr = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s)
+
+// Turn the weekly fitness plan into day-pinned workout items for the scheduler
+function workoutItemsFromPlan(planRow, now) {
+  if (!planRow?.plan) return []
+  let monday
+  if (planRow.week_start) monday = new Date(`${planRow.week_start}T00:00:00`)
+  else { monday = new Date(now); const dow = monday.getDay() === 0 ? 6 : monday.getDay() - 1; monday.setDate(monday.getDate() - dow); monday.setHours(0, 0, 0, 0) }
+  const todayKey = localDateStr(now)
+  const items = []
+  PLAN_DAYS.forEach((key, i) => {
+    const w = planRow.plan[key]
+    if (!w || w.type === 'rest') return
+    const d = new Date(monday); d.setDate(monday.getDate() + i)
+    const dateStr = localDateStr(d)
+    if (dateStr < todayKey) return   // don't schedule past days
+    items.push({
+      id: null, type: 'personal', prio: 'high',
+      text: `${cap(w.type)} workout${w.notes ? ` — ${w.notes}` : ''}`.slice(0, 80),
+      duration_mins: w.durationMins || 45,
+      day: dateStr, source_key: `workout:${dateStr}`,
+    })
+  })
+  return items
+}
+
 export async function run(supabase, opts = {}) {
   const now      = new Date()
   const nowISO   = now.toISOString()
@@ -55,8 +84,21 @@ export async function run(supabase, opts = {}) {
   const incompleteById = new Map(tasks.filter(t => !t.done).map(t => [t.id, t]))
   const doneIds        = new Set(tasks.filter(t => t.done).map(t => t.id))
 
-  const { data: blocks = [] } = await supabase
+  let { data: blocks = [] } = await supabase
     .from('task_blocks').select('*')
+
+  // ── Replan: wipe all non-done blocks (+ their Google events) and start fresh.
+  // Use after changing scheduling rules so everything re-plans cleanly.
+  if (opts.replan) {
+    if (calendar) {
+      for (const b of blocks.filter(b => b.gcal_event_id && b.status !== 'done')) {
+        try { await deleteGoogleEvent(calendar, b.gcal_event_id) } catch { /* ignore */ }
+      }
+    }
+    await supabase.from('task_blocks').delete().neq('status', 'done')
+    blocks = blocks.filter(b => b.status === 'done')
+    log('TaskScheduler: replan — cleared existing blocks')
+  }
 
   // ── 0. Mirror manual edits (sync_state) to Google Calendar ────────────────
   if (calendar) {
@@ -122,12 +164,13 @@ export async function run(supabase, opts = {}) {
     }
   }
 
-  // ── 3. Propose for incomplete tasks not already committed ─────────────────
-  // Confirmed future blocks are commitments → keep them, treat as busy, and
-  // exclude their tasks from re-proposal.
-  const liveConfirmed = blocks.filter(b =>
-    b.status === 'confirmed' && new Date(b.end_at) >= now && incompleteById.has(b.task_id))
-  const committedTaskIds = new Set(liveConfirmed.map(b => b.task_id))
+  // ── 3. Propose for incomplete tasks + planned workouts not already committed ─
+  // Confirmed/approved future blocks are commitments → keep them, treat as busy,
+  // and exclude their task / workout from re-proposal.
+  const liveCommitted = blocks.filter(b =>
+    ['confirmed', 'approved'].includes(b.status) && new Date(b.end_at) >= now)
+  const committedTaskIds = new Set(liveCommitted.filter(b => b.task_id).map(b => b.task_id))
+  const committedKeys    = new Set(liveCommitted.filter(b => b.source_key).map(b => b.source_key))
 
   // External busy (GCal + Calendly) + confirmed commitments
   const horizonISO = new Date(now.getTime() + HORIZON_DAYS * 86400000).toISOString()
@@ -136,14 +179,20 @@ export async function run(supabase, opts = {}) {
     .eq('busy', true).lt('start_at', horizonISO).gt('end_at', nowISO)
   const busy = [
     ...ext.map(e => ({ start: e.start_at, end: e.end_at })),
-    ...liveConfirmed.map(b => ({ start: b.start_at, end: b.end_at })),
+    ...liveCommitted.map(b => ({ start: b.start_at, end: b.end_at })),
   ]
 
-  const toSchedule = [...incompleteById.values()]
+  // Planned workouts (day-pinned) from the latest fitness plan
+  const { data: planRow } = await supabase
+    .from('fitness_plans').select('week_start,plan')
+    .order('week_start', { ascending: false }).limit(1).maybeSingle()
+  const workouts = workoutItemsFromPlan(planRow, now).filter(w => !committedKeys.has(w.source_key))
+
+  const taskItems = [...incompleteById.values()]
     .filter(t => !committedTaskIds.has(t.id))
     .map(t => ({ id: t.id, text: t.text, type: t.type === 'work' ? 'work' : 'personal', prio: t.prio, duration_mins: t.duration_mins }))
 
-  const proposed = schedule(toSchedule, busy, { now, horizonDays: HORIZON_DAYS })
+  const proposed = schedule([...workouts, ...taskItems], busy, { now, horizonDays: HORIZON_DAYS })
 
   if (!opts.dryRun) {
     // Replace previous proposals/approved-but-unpushed with the fresh plan
@@ -165,6 +214,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   dotenv.config()
   const { createSupabaseClient } = await import('../lib/supabase.js')
   const supabase = createSupabaseClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
-  await run(supabase, { push: process.argv.includes('--push'), dryRun: process.argv.includes('--dry-run') })
+  await run(supabase, {
+    push:    process.argv.includes('--push'),
+    dryRun:  process.argv.includes('--dry-run'),
+    replan:  process.argv.includes('--replan'),
+  })
   process.exit(0)
 }

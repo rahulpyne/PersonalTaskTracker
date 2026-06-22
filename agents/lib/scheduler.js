@@ -10,7 +10,13 @@
  */
 
 // Default block length by priority (minutes); overridden per-task by duration_mins.
-export const DEFAULT_DURATION = { high: 60, med: 30, low: 20 }
+export const DEFAULT_DURATION = { high: 90, med: 60, low: 30 }
+
+// Buffer kept clear between consecutive scheduled blocks (minutes).
+const BREAK_MIN = 30
+
+const localDateStr = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 // Allowed scheduling windows (local hours, 24h).
 //   work     → Mon–Fri only, 9:00–19:00 (core 9–17 is "at work"; overflow to 19)
@@ -63,8 +69,10 @@ export function schedule(tasks, busy = [], opts = {}) {
   // Mutable busy list (Date pairs), seeded with external commitments
   const blocked = busy.map(b => ({ start: new Date(b.start), end: new Date(b.end) }))
 
-  // Priority order, stable within a priority by given order
+  // Order: day-pinned items (e.g. workouts) first so they claim their day,
+  // then by priority, stable within a priority by given order.
   const queue = [...tasks].sort((a, b) =>
+    (a.day ? 0 : 1) - (b.day ? 0 : 1) ||
     (PRIO_RANK[a.prio] ?? 1) - (PRIO_RANK[b.prio] ?? 1))
 
   const placed = []
@@ -73,41 +81,55 @@ export function schedule(tasks, busy = [], opts = {}) {
     const category = task.type === 'work' ? 'work' : 'personal'
     const durMin   = durationFor(task)
     const durMs    = durMin * 60000
+    const pinDay   = task.day || null   // 'YYYY-MM-DD' → schedule only on this day
 
     // Walk forward in STEP_MIN increments from the next step boundary >= now
     let cursor = new Date(Math.ceil(now.getTime() / (STEP_MIN * 60000)) * (STEP_MIN * 60000))
     let slot   = null
 
     while (cursor < horizon) {
+      // Day-pinned items: only this calendar day; give up once past it
+      if (pinDay) {
+        const ck = localDateStr(cursor)
+        if (ck > pinDay) break
+        if (ck < pinDay) { cursor = atTime(new Date(`${pinDay}T00:00:00`), WINDOWS[category].startH * 60); continue }
+      }
+
       const dayStart = new Date(cursor); dayStart.setHours(0, 0, 0, 0)
       const win      = WINDOWS[category] || WINDOWS.personal
 
-      // Skip whole days the category can't use
-      if (!win.days.includes(cursor.getDay())) {
+      // Skip whole days the category can't use (unless pinned — pinned days are honoured)
+      if (!pinDay && !win.days.includes(cursor.getDay())) {
         cursor = atTime(new Date(dayStart.getTime() + DAY_MS), win.startH * 60)
         continue
       }
-      // Before window opens → jump to open; after it closes → next day
+      // Before window opens → jump to open; after it closes → next day (or give up if pinned)
       const open  = atTime(dayStart, win.startH * 60)
       const close = atTime(dayStart, win.endH * 60)
       if (cursor < open)  { cursor = open; continue }
-      if (cursor >= close) { cursor = atTime(new Date(dayStart.getTime() + DAY_MS), win.startH * 60); continue }
+      if (cursor >= close) { if (pinDay) break; cursor = atTime(new Date(dayStart.getTime() + DAY_MS), win.startH * 60); continue }
 
       const candEnd = new Date(cursor.getTime() + durMs)
+      // Window rules apply to everyone (incl. pinned workouts): personal/fitness
+      // still can't sit inside the Mon–Fri 9–5 work block, so weekday workouts
+      // get pushed to the evening.
       if (!withinWindow(category, cursor, candEnd)) {
         cursor = new Date(cursor.getTime() + STEP_MIN * 60000)
         continue
       }
+      if (candEnd > close) { if (pinDay) break; cursor = atTime(new Date(dayStart.getTime() + DAY_MS), win.startH * 60); continue }
+
       const clash = blocked.find(b => overlaps(cursor, candEnd, b.start, b.end))
-      if (clash) { cursor = new Date(clash.end); continue }   // jump past the conflict
+      if (clash) { cursor = new Date(clash.end); continue }   // jump past the conflict (incl. its break)
 
       slot = { start: new Date(cursor), end: candEnd }
       break
     }
 
-    if (!slot) continue   // couldn't fit within horizon
+    if (!slot) continue   // couldn't fit
 
-    blocked.push(slot)
+    // Reserve the slot + a BREAK_MIN buffer so the next block can't butt against it
+    blocked.push({ start: slot.start, end: new Date(slot.end.getTime() + BREAK_MIN * 60000) })
     placed.push({
       task_id:       task.id,
       title:         task.text,
@@ -116,6 +138,7 @@ export function schedule(tasks, busy = [], opts = {}) {
       duration_mins: durMin,
       start_at:      slot.start.toISOString(),
       end_at:        slot.end.toISOString(),
+      source_key:    task.source_key || null,
     })
   }
 

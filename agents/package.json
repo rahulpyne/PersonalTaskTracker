@@ -21,6 +21,7 @@
     "schedule": "node fitness/task-scheduler.js",
     "schedule:dry": "node fitness/task-scheduler.js --dry-run",
     "schedule:push": "node fitness/task-scheduler.js --push",
+    "schedule:replan": "node fitness/task-scheduler.js --replan --push",
     "strava-mcp":       "node fitness/strava-mcp.js"
   },
   "dependencies": {
