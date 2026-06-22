@@ -794,10 +794,13 @@ function StatTile({idx,type,label,value,unit,dec=0,delta,spark}){
 }
 
 // ── HRV/RHR dual trend ────────────────────────────────────────────────────────
-function DualTrend({daily}){
+function DualTrend({daily:dailyRaw}){
   const ref=useRef(null);const[w,setW]=useState(560)
   useEffect(()=>{if(!ref.current)return;const ro=new ResizeObserver(([e])=>setW(Math.max(280,e.contentRect.width)));ro.observe(ref.current);return()=>ro.disconnect()},[])
   const[hover,setHover]=useState(null)
+  // Only plot days that actually have data — filters out zero-padded rows and
+  // ensures the axis rescales correctly when switching between 1W / 1M / 6M / 1Y.
+  const daily=dailyRaw.filter(d=>(d.hrv||0)>0||(d.resting_hr||0)>0)
   if(!daily.length) return <div style={{height:260,display:'flex',alignItems:'center',justifyContent:'center',color:'var(--fd-ink3)',fontFamily:'var(--fd-mono)',fontSize:11}}>No health data yet</div>
   const h=260,pL=36,pR=36,pT=24,pB=28,iW=w-pL-pR,iH=h-pT-pB
   const hrvV=daily.map(d=>d.hrv||0),rhrV=daily.map(d=>d.resting_hr||0)
@@ -833,6 +836,11 @@ function DualTrend({daily}){
           </g>
         )}
       </svg>
+      {/* x-axis range labels */}
+      <div style={{display:'flex',justifyContent:'space-between',fontFamily:'var(--fd-mono)',fontSize:9,color:'var(--fd-ink3)',paddingLeft:pL,paddingRight:pR}}>
+        <span>{new Date(daily[0].date+'T12:00').toLocaleDateString('en',{month:'short',day:'numeric'})}</span>
+        <span>{new Date(daily[daily.length-1].date+'T12:00').toLocaleDateString('en',{month:'short',day:'numeric'})}</span>
+      </div>
       {hover!=null&&daily[hover]&&(
         <div style={{position:'absolute',background:'#0e0c0a',border:'1px solid rgba(255,255,255,0.1)',color:'var(--fd-ink1)',padding:'10px 13px',borderRadius:8,fontFamily:'var(--fd-mono)',fontSize:10.5,pointerEvents:'none',zIndex:10,top:6,left:`${(xAt(hover)/w)*100}%`,transform:hover>daily.length*0.7?'translate(-100%,0)':hover<daily.length*0.2?'translate(0,0)':'translate(-50%,0)'}}>
           <div style={{color:'var(--fd-ink3)',fontSize:10,marginBottom:6}}>{new Date(daily[hover].date).toLocaleDateString('en',{weekday:'short',month:'short',day:'numeric'})}</div>
@@ -2118,7 +2126,12 @@ function DurationPill({value,onChange}){
 }
 function sliceByDuration(arr,dur){
   const n=dur==='7d'?7:dur==='1m'?30:dur==='6m'?180:365
-  return arr.slice(-n)
+  const cutoff=new Date(); cutoff.setDate(cutoff.getDate()-n)
+  const cutoffStr=localDateStr(cutoff)
+  // Sort ascending by date, then filter to only rows within the selected window
+  return [...arr]
+    .sort((a,b)=>(a.date||'')>(b.date||'')?1:-1)
+    .filter(r=>(r.date||'')>=cutoffStr)
 }
 
 // ── Health trends from Apple Health ──────────────────────────────────────────
