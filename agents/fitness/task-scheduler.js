@@ -177,9 +177,13 @@ export async function run(supabase, opts = {}) {
   const { data: ext = [] } = await supabase
     .from('calendar_events').select('start_at,end_at')
     .eq('busy', true).lt('start_at', horizonISO).gt('end_at', nowISO)
+  // Future 'done' blocks are completed commitments occupying real time → reserve
+  // them too, so fresh proposals never land on top of them.
+  const futureDone = blocks.filter(b => b.status === 'done' && new Date(b.end_at) >= now)
   const busy = [
     ...ext.map(e => ({ start: e.start_at, end: e.end_at })),
     ...liveCommitted.map(b => ({ start: b.start_at, end: b.end_at })),
+    ...futureDone.map(b => ({ start: b.start_at, end: b.end_at })),
   ]
 
   // Planned workouts (day-pinned) from the latest fitness plan

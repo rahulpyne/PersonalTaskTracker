@@ -128,8 +128,12 @@ export function schedule(tasks, busy = [], opts = {}) {
 
     if (!slot) continue   // couldn't fit
 
-    // Reserve the slot + a BREAK_MIN buffer so the next block can't butt against it
-    blocked.push({ start: slot.start, end: new Date(slot.end.getTime() + BREAK_MIN * 60000) })
+    // Reserve the slot + a BREAK_MIN buffer on BOTH sides, so no other scheduled
+    // block can butt against it regardless of processing order (30-min gaps).
+    blocked.push({
+      start: new Date(slot.start.getTime() - BREAK_MIN * 60000),
+      end:   new Date(slot.end.getTime() + BREAK_MIN * 60000),
+    })
     placed.push({
       task_id:       task.id,
       title:         task.text,
