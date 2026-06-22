@@ -864,19 +864,35 @@ function Heatmap({cells,streakDays=new Set()}){
     if(pos>0)cols.push([...col])
     return cols
   },[cells])
-  // Colour ramp: rest → faint → olive → green → bright-green → orange (streak)
-  const maxCals=useMemo(()=>Math.max(150,...cells.map(c=>c.cals)),[cells])
+  // Smooth gradient ramp — 5 OKLCH stops from near-invisible → vivid teal-green → amber peak
+  // Stops: [lightness, chroma, hue]
+  const RAMP=[
+    [0.22, 0.04, 145],   // 0 % — barely visible
+    [0.38, 0.09, 148],   // 25 %
+    [0.54, 0.15, 150],   // 50 %
+    [0.68, 0.20, 145],   // 75 %
+    [0.79, 0.22, 132],   // 100 % — bright lime-green
+  ]
+  const lerpRamp=(t)=>{
+    const scaled=Math.max(0,Math.min(1,t))*(RAMP.length-1)
+    const lo=Math.floor(scaled),hi=Math.min(RAMP.length-1,lo+1),f=scaled-lo
+    const [L0,C0,H0]=RAMP[lo],[L1,C1,H1]=RAMP[hi]
+    return`oklch(${+(L0+(L1-L0)*f).toFixed(3)} ${+(C0+(C1-C0)*f).toFixed(3)} ${+(H0+(H1-H0)*f).toFixed(1)})`
+  }
+  // Use a p85 ceiling so outlier mega-days don't wash out everything else
+  const maxCals=useMemo(()=>{
+    const active=cells.map(c=>c.cals).filter(v=>v>0).sort((a,b)=>a-b)
+    if(!active.length) return 500
+    return active[Math.min(active.length-1,Math.floor(active.length*0.85))]
+  },[cells])
   const iColor=(cals,inStreak)=>{
-    if(cals<=0) return 'rgba(255,255,255,0.05)'
+    if(cals<=0) return 'rgba(255,255,255,0.04)'
     if(inStreak) return ORANGE
-    const t=Math.min(1,cals/maxCals)
-    if(t<0.20) return 'oklch(38% 0.07 145)'
-    if(t<0.45) return 'oklch(52% 0.13 145)'
-    if(t<0.72) return 'oklch(65% 0.17 145)'
-    return 'oklch(76% 0.20 130)'
+    return lerpRamp(cals/maxCals)
   }
   const monthLabels=useMemo(()=>grid.map((col,ci)=>{const fr=col.find(c=>c&&!c.empty);if(!fr)return'';if(ci===0)return fr.dateObj.toLocaleString('en',{month:'short'});const pv=grid[ci-1].find(c=>c&&!c.empty);if(!pv)return'';return pv.dateObj.getMonth()!==fr.dateObj.getMonth()?fr.dateObj.toLocaleString('en',{month:'short'}):''}),[grid])
-  const legendColors=['rgba(255,255,255,0.05)','oklch(38% 0.07 145)','oklch(52% 0.13 145)','oklch(65% 0.17 145)','oklch(76% 0.20 130)',ORANGE]
+  // Legend: continuous gradient strip instead of discrete swatches
+  const legendGrad=`linear-gradient(to right,${RAMP.map(([L,C,H],i)=>`oklch(${L} ${C} ${H}) ${i/(RAMP.length-1)*100}%`).join(',')})`
   return(
     <div style={{position:'relative',overflow:'hidden'}}>
       <div ref={scrollRef} style={{overflowX:'auto',paddingBottom:6}}>
@@ -920,10 +936,9 @@ function Heatmap({cells,streakDays=new Set()}){
         <span>Last 26 weeks · colour by kcal/day · all activity types · 🔥 streak days</span>
         <div style={{display:'inline-flex',alignItems:'center',gap:6}}>
           <span>less</span>
-          {legendColors.map((c,i)=>(
-            <span key={i} style={{width:12,height:12,borderRadius:3,background:c,display:'inline-block',outline:i===5?`1.5px solid ${ORANGE}`:undefined,outlineOffset:i===5?'-1px':undefined}}/>
-          ))}
-          <span>more</span>
+          <span style={{width:80,height:12,borderRadius:3,background:legendGrad,display:'inline-block'}}/>
+          <span style={{width:12,height:12,borderRadius:3,background:ORANGE,display:'inline-block',outline:`1.5px solid ${ORANGE}`,outlineOffset:'-1px',boxShadow:`0 0 5px 1px ${ORANGE}60`}}/>
+          <span>streak</span>
         </div>
       </div>
       {tip&&(
