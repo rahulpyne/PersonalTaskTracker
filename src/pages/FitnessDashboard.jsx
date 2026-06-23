@@ -976,13 +976,16 @@ function Heatmap({cells,streakDays=new Set()}){
   )
 }
 
+// Downtown Vancouver — always open at city level regardless of route spread.
+const VAN_CENTER=[49.258,-123.135]
+
 // ── Leaflet auto-fit helper ───────────────────────────────────────────────────
 function FitBounds({coords}){
   const map=useMap()
   useEffect(()=>{
     if(!coords.length) return
-    try { map.fitBounds(coords,{padding:[24,24]}) } catch(_){}
-  },[]) // eslint-disable-line
+    try { map.setView(VAN_CENTER,12) } catch(_){}
+  },[coords])
   return null
 }
 
@@ -1125,19 +1128,19 @@ function RouteMap({routes}){
 
   const filtered=filter==='all'?allDecoded:allDecoded.filter(r=>r.type===filter)
 
-  // Fit bounds to Vancouver-area routes only so the map stays zoomed into PNW.
-  // Stray routes (far-away races, travels) are still rendered but excluded from the
-  // initial fit — they can be reached via the search box.
-  const PNW_BOX={minLat:48.0,maxLat:50.8,minLon:-125.5,maxLon:-121.0}
+  // Fit bounds to Metro Vancouver routes only. Tight box so fitBounds stays zoomed in.
+  // Static hikes (Washington state, ~lat 47) are outside this box — excluded.
+  // The map keeps its Vancouver default (zoom 12) until Strava routes arrive.
+  const METRO_VAN={minLat:49.0,maxLat:49.65,minLon:-123.45,maxLon:-122.45}
   const fitCoords=useMemo(()=>{
-    const local=allDecoded.filter(r=>{
+    const local=decoded.filter(r=>{
       const lats=r.coords.map(c=>c[0]),lons=r.coords.map(c=>c[1])
       const midLat=(Math.min(...lats)+Math.max(...lats))/2
       const midLon=(Math.min(...lons)+Math.max(...lons))/2
-      return midLat>=PNW_BOX.minLat&&midLat<=PNW_BOX.maxLat&&midLon>=PNW_BOX.minLon&&midLon<=PNW_BOX.maxLon
+      return midLat>=METRO_VAN.minLat&&midLat<=METRO_VAN.maxLat&&midLon>=METRO_VAN.minLon&&midLon<=METRO_VAN.maxLon
     })
-    return(local.length>0?local:allDecoded).flatMap(r=>r.coords)
-  },[allDecoded])
+    return local.flatMap(r=>r.coords)
+  },[decoded])
 
   // Fallback centre: Pacific Northwest. FitBounds overrides this once data loads.
   const PNW = [49.258, -123.135]  // Vancouver, BC
