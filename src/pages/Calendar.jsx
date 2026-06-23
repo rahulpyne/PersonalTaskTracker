@@ -25,6 +25,17 @@ const minsInto = (d) => d.getHours() * 60 + d.getMinutes()
 const fmtHour  = (h) => `${((h + 11) % 12) + 1}${h < 12 ? 'a' : 'p'}`
 const fmtTime  = (d) => d.toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' })
 
+// Detect mobile viewport
+function useIsMobile() {
+  const [mobile, setMobile] = useState(() => window.innerWidth < 640)
+  useEffect(() => {
+    const h = () => setMobile(window.innerWidth < 640)
+    window.addEventListener('resize', h)
+    return () => window.removeEventListener('resize', h)
+  }, [])
+  return mobile
+}
+
 export default function Calendar() {
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
   const [events,    setEvents]    = useState([])
@@ -32,16 +43,36 @@ export default function Calendar() {
   const [plan,      setPlan]      = useState(null)
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState(null)
+  const isMobile = useIsMobile()
+  // Mobile: track which day is the first of the 3-day window
+  const [mobileAnchor, setMobileAnchor] = useState(() => {
+    const today = new Date(); today.setHours(0,0,0,0); return today
+  })
 
   const weekDates = useMemo(
     () => Array.from({ length: 7 }, (_, i) => new Date(weekStart.getTime() + i * DAY_MS)),
     [weekStart]
   )
 
+  // Mobile: 3 days starting from mobileAnchor
+  const mobileDates = useMemo(
+    () => Array.from({ length: 3 }, (_, i) => new Date(mobileAnchor.getTime() + i * DAY_MS)),
+    [mobileAnchor]
+  )
+
+  // Which dates to actually render
+  const visibleDates = isMobile ? mobileDates : weekDates
+
+  // Sync weekStart when mobileAnchor changes so data fetch covers the window
+  const fetchFrom = isMobile ? mobileAnchor : weekStart
+  const fetchTo   = isMobile
+    ? new Date(mobileAnchor.getTime() + 3 * DAY_MS)
+    : new Date(weekStart.getTime() + 7 * DAY_MS)
+
   const load = useCallback(async () => {
     setLoading(true); setError(null)
-    const from = weekStart.toISOString()
-    const to   = new Date(weekStart.getTime() + 7 * DAY_MS).toISOString()
+    const from = fetchFrom.toISOString()
+    const to   = fetchTo.toISOString()
     // Independent — a missing table shouldn't hide the others
     const [evsRes, planRes, blkRes] = await Promise.allSettled([
       fetchCalendarEvents(from, to),
@@ -53,7 +84,7 @@ export default function Calendar() {
     setPlan(planRes.status === 'fulfilled' ? planRes.value : null)
     setBlocks(blkRes.status === 'fulfilled' ? blkRes.value : [])
     setLoading(false)
-  }, [weekStart])
+  }, [weekStart, mobileAnchor, isMobile])
 
   const onApprove = useCallback(async (id) => {
     setBlocks(bs => bs.map(b => b.id === id ? { ...b, status: 'approved' } : b))
@@ -123,39 +154,54 @@ export default function Calendar() {
   }
 
   const today = new Date()
-  const _a = weekDates[0], _b = weekDates[6]
+  const _a = visibleDates[0], _b = visibleDates[visibleDates.length - 1]
   const _mo = (d) => d.toLocaleDateString('en', { month: 'long' })
   const monthLabel = _a.getMonth() === _b.getMonth()
     ? `${_mo(_a)} ${_a.getDate()} – ${_b.getDate()}, ${_b.getFullYear()}`
     : `${_mo(_a)} ${_a.getDate()} – ${_mo(_b)} ${_b.getDate()}, ${_b.getFullYear()}`
 
+  const navPrev = () => isMobile
+    ? setMobileAnchor(d => new Date(d.getTime() - 3 * DAY_MS))
+    : setWeekStart(d => new Date(d.getTime() - 7 * DAY_MS))
+  const navNext = () => isMobile
+    ? setMobileAnchor(d => new Date(d.getTime() + 3 * DAY_MS))
+    : setWeekStart(d => new Date(d.getTime() + 7 * DAY_MS))
+  const navToday = () => {
+    const t = new Date(); t.setHours(0,0,0,0)
+    setMobileAnchor(t)
+    setWeekStart(mondayOf(new Date()))
+  }
+
+  const colCount = visibleDates.length
+  const gridCols = `48px repeat(${colCount}, 1fr)`
+
   return (
     <div style={{ padding: '0 0 80px' }}>
       {/* ── Header / controls ── */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 18 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 26, letterSpacing: '-0.02em' }}>Calendar</h1>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-3)', marginTop: 4 }}>{monthLabel}</div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           {proposedCount > 0 && (
             <button onClick={onApproveAll} style={{
-              fontFamily: 'var(--mono)', fontSize: 12, padding: '6px 12px', borderRadius: 8,
+              fontFamily: 'var(--mono)', fontSize: 11, padding: '6px 10px', borderRadius: 8,
               border: '1px solid var(--good)', background: 'color-mix(in oklch, var(--good) 14%, transparent)',
               color: 'var(--ink)', cursor: 'pointer', fontWeight: 600,
-            }}>✓ Approve {proposedCount} block{proposedCount !== 1 ? 's' : ''}</button>
+            }}>✓ {proposedCount} block{proposedCount !== 1 ? 's' : ''}</button>
           )}
-          <NavBtn onClick={() => setEditing({ add: true })}>+ Add block</NavBtn>
-          <NavBtn onClick={() => setWeekStart(d => new Date(d.getTime() - 7 * DAY_MS))}>‹</NavBtn>
-          <NavBtn onClick={() => setWeekStart(mondayOf(new Date()))}>Today</NavBtn>
-          <NavBtn onClick={() => setWeekStart(d => new Date(d.getTime() + 7 * DAY_MS))}>›</NavBtn>
+          <NavBtn onClick={() => setEditing({ add: true })}>+ Add</NavBtn>
+          <NavBtn onClick={navPrev}>‹</NavBtn>
+          <NavBtn onClick={navToday}>Today</NavBtn>
+          <NavBtn onClick={navNext}>›</NavBtn>
         </div>
       </div>
 
       {editing && (
         <BlockModal
           block={editing.add ? null : editing}
-          defaultDate={weekDates[0]}
+          defaultDate={visibleDates[0]}
           onClose={() => setEditing(null)}
           onSave={onSaveEdit}
           onComplete={onComplete}
@@ -164,14 +210,14 @@ export default function Calendar() {
       )}
 
       {/* ── Legend ── */}
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 14, fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 14, fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>
         {Object.values(SRC).map(s => (
-          <span key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 10, height: 10, borderRadius: 3, background: s.bar }} /> {s.label}
+          <span key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ width: 9, height: 9, borderRadius: 3, background: s.bar, flexShrink: 0 }} /> {s.label}
           </span>
         ))}
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 10, height: 10, borderRadius: 3, border: '1px dashed var(--ink-3)' }} /> Task block (▸ = auto-scheduled)
+        <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ width: 9, height: 9, borderRadius: 3, border: '1px dashed var(--ink-3)', flexShrink: 0 }} /> Task block
         </span>
       </div>
 
@@ -183,13 +229,14 @@ export default function Calendar() {
       )}
 
       {/* ── Day headers ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '48px repeat(7, 1fr)', borderBottom: '1px solid var(--line)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: '1px solid var(--line)' }}>
         <div />
-        {weekDates.map((d, i) => {
+        {visibleDates.map((d, i) => {
           const isToday = sameDay(d, today)
+          const dayName = d.toLocaleDateString('en', { weekday: 'short' })
           return (
             <div key={i} style={{ textAlign: 'center', padding: '6px 2px 8px' }}>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', letterSpacing: '.08em' }}>{DAYS[i]}</div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', letterSpacing: '.08em' }}>{dayName}</div>
               <div style={{
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 width: 26, height: 26, marginTop: 3, borderRadius: '50%', fontSize: 13,
@@ -202,11 +249,13 @@ export default function Calendar() {
       </div>
 
       {/* ── All-day + planned fitness row ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '48px repeat(7, 1fr)', borderBottom: '1px solid var(--line)', minHeight: 34 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: '1px solid var(--line)', minHeight: 34 }}>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 8.5, color: 'var(--ink-3)', padding: '6px 4px', textAlign: 'right' }}>all-day</div>
-        {weekDates.map((d, i) => {
+        {visibleDates.map((d, i) => {
           const dayAllDay = allDay.filter(e => e._start <= new Date(d.getTime() + DAY_MS) && e._end > d)
-          const p = planFor(i)
+          // planFor uses week-day index — find the correct PLAN_KEY from the date's day-of-week
+          const dow = (d.getDay() + 6) % 7 // 0=Mon
+          const p = planFor(dow)
           return (
             <div key={i} style={{ borderLeft: '1px solid var(--line)', padding: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
               {dayAllDay.map(e => <Chip key={e.id} src={SRC[e.source] || SRC.google} title={e.title} />)}
@@ -217,7 +266,7 @@ export default function Calendar() {
       </div>
 
       {/* ── Time grid ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '48px repeat(7, 1fr)', position: 'relative' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: gridCols, position: 'relative' }}>
         {/* Hour labels */}
         <div style={{ position: 'relative', height: gridH }}>
           {hours.map((h, i) => (
@@ -226,7 +275,7 @@ export default function Calendar() {
         </div>
 
         {/* Day columns */}
-        {weekDates.map((d, di) => {
+        {visibleDates.map((d, di) => {
           const dayEvents = layoutDay(timed.filter(e => sameDay(e._start, d)))
           const isToday = sameDay(d, today)
           const nowTop = isToday ? ((minsInto(today) - hStart * 60) / ((hEnd - hStart) * 60)) * gridH : null

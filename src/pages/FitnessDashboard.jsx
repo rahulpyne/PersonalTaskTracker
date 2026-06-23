@@ -893,17 +893,31 @@ function Heatmap({cells,streakDays=new Set()}){
     if(!active.length) return 500
     return active[Math.min(active.length-1,Math.floor(active.length*0.85))]
   },[cells])
+  // Warm amber→orange ramp for streak days — intensity still visible within the highlight
+  const SRAMP=[
+    [0.30,0.10,55],  // dim amber
+    [0.52,0.17,50],  // mid amber
+    [0.70,0.21,45],  // warm orange
+    [0.82,0.24,40],  // bright orange
+  ]
+  const lerpStreak=(t)=>{
+    const sc=Math.max(0,Math.min(1,t))*(SRAMP.length-1)
+    const lo=Math.floor(sc),hi=Math.min(SRAMP.length-1,lo+1),f=sc-lo
+    const[L0,C0,H0]=SRAMP[lo],[L1,C1,H1]=SRAMP[hi]
+    return`oklch(${+(L0+(L1-L0)*f).toFixed(3)} ${+(C0+(C1-C0)*f).toFixed(3)} ${+(H0+(H1-H0)*f).toFixed(1)})`
+  }
+  const streakLegendGrad=`linear-gradient(to right,${SRAMP.map(([L,C,H],i)=>`oklch(${L} ${C} ${H}) ${i/(SRAMP.length-1)*100}%`).join(',')})`
   const iColor=(cals,inStreak)=>{
     if(cals<=0) return 'rgba(255,255,255,0.04)'
-    if(inStreak) return ORANGE
+    if(inStreak) return lerpStreak(cals/maxCals)
     return lerpRamp(cals/maxCals)
   }
   const monthLabels=useMemo(()=>grid.map((col,ci)=>{const fr=col.find(c=>c&&!c.empty);if(!fr)return'';if(ci===0)return fr.dateObj.toLocaleString('en',{month:'short'});const pv=grid[ci-1].find(c=>c&&!c.empty);if(!pv)return'';return pv.dateObj.getMonth()!==fr.dateObj.getMonth()?fr.dateObj.toLocaleString('en',{month:'short'}):''}),[grid])
   // Legend: continuous gradient strip instead of discrete swatches
   const legendGrad=`linear-gradient(to right,${RAMP.map(([L,C,H],i)=>`oklch(${L} ${C} ${H}) ${i/(RAMP.length-1)*100}%`).join(',')})`
   return(
-    <div style={{position:'relative',overflow:'hidden'}}>
-      <div ref={scrollRef} style={{overflowX:'auto',paddingBottom:6}}>
+    <div style={{position:'relative'}}>
+      <div ref={scrollRef} style={{overflowX:'auto',WebkitOverflowScrolling:'touch',paddingBottom:6}}>
         <div style={{display:'grid',gridTemplateColumns:'24px 1fr',gap:6,minWidth:720}}>
           <div style={{display:'grid',gridTemplateRows:'repeat(7, 14px)',gap:3,fontFamily:'var(--fd-mono)',fontSize:9,color:'var(--fd-ink3)',paddingTop:14}}>
             {['','Mon','','Wed','','Fri',''].map((d,i)=><span key={i} style={{display:'flex',alignItems:'center',height:14}}>{d}</span>)}
@@ -945,8 +959,8 @@ function Heatmap({cells,streakDays=new Set()}){
         <div style={{display:'inline-flex',alignItems:'center',gap:6}}>
           <span>less</span>
           <span style={{width:80,height:12,borderRadius:3,background:legendGrad,display:'inline-block'}}/>
-          <span style={{width:12,height:12,borderRadius:3,background:ORANGE,display:'inline-block',outline:`1.5px solid ${ORANGE}`,outlineOffset:'-1px',boxShadow:`0 0 5px 1px ${ORANGE}60`}}/>
-          <span>streak</span>
+          <span style={{width:36,height:12,borderRadius:3,background:streakLegendGrad,display:'inline-block',outline:`1.5px solid ${ORANGE}`,outlineOffset:'-1px',boxShadow:`0 0 5px 1px ${ORANGE}60`}}/>
+          <span>streak intensity</span>
         </div>
       </div>
       {tip&&(
@@ -1111,8 +1125,19 @@ function RouteMap({routes}){
 
   const filtered=filter==='all'?allDecoded:allDecoded.filter(r=>r.type===filter)
 
-  // Fit bounds to all routes (Strava + static) so map auto-centres on maximum data
-  const fitCoords=useMemo(()=>allDecoded.flatMap(r=>r.coords),[allDecoded])
+  // Fit bounds to Vancouver-area routes only so the map stays zoomed into PNW.
+  // Stray routes (far-away races, travels) are still rendered but excluded from the
+  // initial fit — they can be reached via the search box.
+  const PNW_BOX={minLat:48.0,maxLat:50.8,minLon:-125.5,maxLon:-121.0}
+  const fitCoords=useMemo(()=>{
+    const local=allDecoded.filter(r=>{
+      const lats=r.coords.map(c=>c[0]),lons=r.coords.map(c=>c[1])
+      const midLat=(Math.min(...lats)+Math.max(...lats))/2
+      const midLon=(Math.min(...lons)+Math.max(...lons))/2
+      return midLat>=PNW_BOX.minLat&&midLat<=PNW_BOX.maxLat&&midLon>=PNW_BOX.minLon&&midLon<=PNW_BOX.maxLon
+    })
+    return(local.length>0?local:allDecoded).flatMap(r=>r.coords)
+  },[allDecoded])
 
   // Fallback centre: Pacific Northwest. FitBounds overrides this once data loads.
   const PNW = [49.258, -123.135]  // Vancouver, BC
@@ -3606,7 +3631,7 @@ export default function FitnessDashboard(){
         <div style={{marginTop:40}}>
           <SectionHead num="01" label="Snapshot" title={<>This <em style={{color:'rgba(255,255,255,0.45)'}}>week.</em></>}
             right={wk&&<span style={{display:'inline-flex',alignItems:'center',gap:6,border:`1px solid ${recoveryColors[wk.recoveryStatus]}44`,borderRadius:999,padding:'4px 10px',color:recoveryColors[wk.recoveryStatus]}}><span style={{width:6,height:6,borderRadius:'50%',background:recoveryColors[wk.recoveryStatus],display:'inline-block'}}/>{recoveryLabels[wk.recoveryStatus]}</span>}/>
-          <div style={{display:'grid',gap:12,gridTemplateColumns:'repeat(5,1fr)'}}>
+          <div className="fd-herostats" style={{display:'grid',gap:12,gridTemplateColumns:'repeat(5,1fr)'}}>
             <StatTile idx={0} type="distance"    label="Distance — wk"  value={wk?.distKm??0}   unit="km"  dec={1} delta={wk?.deltas.dist}  spark={weeklyData.map(d=>d.total_km)}/>
             <StatTile idx={1} type="active_days" label="Active days"     value={wk?.days??0}     unit="/ 7"        delta={wk?.deltas.days}/>
             <StatTile idx={2} type="hrv"         label="Avg HRV"         value={wk?.avgHRV??null} unit="ms"        delta={wk?.deltas.hrv}   spark={trend30.map(d=>d.hrv||0)}/>
